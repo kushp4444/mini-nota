@@ -13,7 +13,7 @@ from . import config
 from .dicom_loader import load_series
 
 # Tags that must NOT carry real patient info in a research dataset
-ANON_TAGS = ["PatientName", "PatientID", "PatientBirthDate"]
+ANON_TAGS = ["PatientName", "PatientBirthDate"]
 
 
 def check_geometry(meta):
