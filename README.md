@@ -1,4 +1,4 @@
-# mini-ipro
+# mini-nota
 
 A toy-scale replica of Altis Labs' IPRO pipeline: CT scans in, survival prediction out.
 
@@ -54,7 +54,7 @@ python -m src.pipeline --stage survival
 ## Project layout
 
 ```
-mini-ipro/
+mini-nota/
 ├── src/
 │   ├── config.py            # paths, thresholds, constants
 │   ├── dicom_loader.py      # DICOM series -> 3D numpy volume (Hounsfield units)

@@ -1,4 +1,4 @@
-"""CLI entry point tying the mini-IPRO stages together.
+"""CLI entry point tying the mini-nota stages together.
 
     python -m src.pipeline --stage qc       --data data/raw --subset 30
     python -m src.pipeline --stage masks     --data data/raw --subset 30
@@ -35,7 +35,7 @@ def iter_patients(raw_dir, subset=None):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="mini-ipro pipeline")
+    ap = argparse.ArgumentParser(description="mini-nota pipeline")
     ap.add_argument("--stage", required=True,
                     choices=["qc", "masks", "features", "survival"])
     ap.add_argument("--data", default=str(config.RAW_DIR))
