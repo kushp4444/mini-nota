@@ -8,6 +8,7 @@
 Run from the repo root. Start with --subset while iterating; drop it to go full.
 """
 import argparse
+import numpy as np
 from pathlib import Path
 
 from . import config
@@ -72,10 +73,10 @@ def main():
                 print(f"SKIP {pid}: no rtstruct file")
                 continue
             image, meta = load_series(ct)
-            mask = rtstruct_to_mask(ct, rt, args.roi)
-            spacing = (meta["slice_thickness"] or 1.0, 1.0, 1.0)
+            mask = np.transpose(rtstruct_to_mask(ct, rt, args.roi, geometry=meta), (2, 0, 1))
+            spacing = meta["spacing"]
             rows.append({"patient_id": pid, "image": image,
-                         "mask": mask, "spacing": spacing})
+                         "mask": mask, "spacing": spacing, "geometry": meta})
         extract_all(rows)
 
     elif args.stage == "survival":

@@ -14,11 +14,13 @@ from fastapi.testclient import TestClient
 from service.app import app
 from service.catalog import DATABASE_URL
 from test_engine import write_scan
+from test_masks_geometry import physical_tumor
 
 @pytest.fixture(scope='module')
 def client(tmp_path_factory):
     root = tmp_path_factory.mktemp('api-dicom')
-    write_scan(root, 'TEST-CLEAN')
+    physical_tumor(root, 'TEST-CLEAN')
+    write_scan(root, 'TEST-NO-MASK')
     ct = write_scan(root, 'TEST-PRIVACY')
     ds = pydicom.dcmread(ct / '3.dcm')
     ds.PatientName = 'PRIVATE_VALUE_DO_NOT_DISPLAY'
@@ -31,7 +33,7 @@ def client(tmp_path_factory):
     ds.save_as(ct / '3.dcm', enforce_file_format=True)
     ct = write_scan(root, 'TEST-GEOMETRY')
     for path in list(ct.glob('*.dcm'))[1:]: path.unlink()
-    ids = ['TEST-CLEAN','TEST-PRIVACY','TEST-BROKEN','TEST-SPACING','TEST-GEOMETRY']
+    ids = ['TEST-NO-MASK','TEST-CLEAN','TEST-PRIVACY','TEST-BROKEN','TEST-SPACING','TEST-GEOMETRY']
     with psycopg.connect(DATABASE_URL) as conn:
         for pid in ids:
             conn.execute('INSERT INTO patient_catalog VALUES (%s,%s,true) ON CONFLICT DO NOTHING', (pid,'Automated test fixture'))
@@ -92,3 +94,26 @@ def test_geometry_and_spacing_failures_are_visible_by_patient(client):
     assert spacing['patient_id']=='TEST-SPACING'
     assert spacing['values']['slice_spacing']['passed'] is False
     assert geometry['status']==spacing['status']=='failed'
+
+
+def test_masks_follow_qc_and_keep_portable_overlay_bytes_and_named_failures(client):
+    import base64
+    import hashlib
+    run = client.post('/runs', json={'patient_ids':['TEST-PRIVACY','TEST-NO-MASK','TEST-CLEAN']}).json()
+    headers = {'Authorization': f"Bearer {run['secret']}"}
+    url = f"/runs/{run['id']}"
+    client.get(url + '/events', headers=headers)
+    result = client.get(url, headers=headers).json()
+    masks = result['stage_results']['masks']
+    assert [p['patient_id'] for p in masks] == ['TEST-NO-MASK','TEST-CLEAN']
+    assert masks[0]['errors'][0]['code'] == 'missing_rtstruct'
+    assert masks[1]['values']['voxel_count'] == 27
+    assert masks[1]['values']['volume_cm3'] == .324
+    overlay = next(a for a in masks[1]['artifacts'] if a['role'] == 'overlay')
+    data = base64.b64decode(overlay['data_base64'], validate=True)
+    assert data.startswith(b'\x89PNG\r\n\x1a\n')
+    assert hashlib.sha256(data).hexdigest() == overlay['sha256']
+    assert all(a['role'] != 'mask' for a in masks[1]['artifacts'])
+    calls = [e['payload'] for e in result['events'] if e['kind'] == 'tool_call' and e['payload'].get('stage') == 'masks']
+    assert [e['patient_id'] for e in calls] == ['TEST-NO-MASK','TEST-CLEAN']
+    assert any(e['kind']=='error' and e['payload'].get('stage')=='masks' and e['payload']['patient_id']=='TEST-NO-MASK' for e in result['events'])

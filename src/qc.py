@@ -10,7 +10,7 @@ import pydicom
 from pathlib import Path
 
 from . import config
-from .dicom_loader import load_series
+from .dicom_loader import load_series, GeometryError
 
 # Tags that must NOT carry real patient info in a research dataset
 ANON_TAGS = ["PatientName", "PatientBirthDate"]
@@ -43,11 +43,15 @@ def check_anonymized(first_slice, anon_tags=ANON_TAGS, *, public_patient_id=None
 def run_qc(series_dir, max_jitter_mm=config.MAX_SPACING_JITTER_MM):
     """Run every check on one series directory. Returns a dict for the audit log."""
     dcm_files = sorted(Path(series_dir).glob("*.dcm"))
-    _, meta = load_series(series_dir)
-
-    results = {"series_dir": str(series_dir), "patient_id": meta["patient_id"]}
-    results["geometry"] = check_geometry(meta)
-    results["slice_spacing"] = check_slice_spacing(meta, max_jitter_mm)
+    try:
+        _, meta = load_series(series_dir)
+        results = {"series_dir": str(series_dir), "patient_id": meta["patient_id"]}
+        results["geometry"] = check_geometry(meta)
+        results["slice_spacing"] = check_slice_spacing(meta, max_jitter_mm)
+    except GeometryError as exc:
+        results = {"series_dir": str(series_dir), "patient_id": Path(series_dir).parent.name,
+                   "geometry": (False, str(exc)),
+                   "slice_spacing": (False, "Physical grid could not be verified: " + str(exc))}
     # Check every header: a later slice must not hide an unexpected identifier.
     checks = [check_anonymized(pydicom.dcmread(str(path), stop_before_pixels=True),
                                public_patient_id=Path(series_dir).parent.name)

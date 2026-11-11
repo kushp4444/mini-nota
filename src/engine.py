@@ -13,8 +13,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from .qc import run_qc
-from .dicom_loader import load_series
-from .masks import rtstruct_to_mask
+from .dicom_loader import load_series, GeometryError
+from .masks import rtstruct_to_mask, MaskError
+from PIL import Image
 from .extract_features import extract_one
 
 
@@ -76,9 +77,9 @@ class EngineWorkspace:
                         patient['errors'].append(_error('missing_rtstruct', 'Patient has no RTSTRUCT'))
                         continue
                     image, meta = load_series(ct)
-                    # rt-utils returns (row, column, slice); loader uses (slice, row, column).
+                    # The corrected RTSTRUCT adapter returns (row,column,slice); CT is (slice,row,column).
                     mask = np.transpose(rtstruct_to_mask(
-                        ct, ct.parent / 'rtstruct.dcm', roi_name), (2, 0, 1))
+                        ct, ct.parent / 'rtstruct.dcm', roi_name, geometry=meta), (2, 0, 1))
                     if mask.shape != image.shape:
                         raise ValueError('Image-mask shape mismatch')
                     directory = self.path / stage
@@ -87,12 +88,23 @@ class EngineWorkspace:
                     if stage == 'masks':
                         path = directory / f'{patient_id}.npy'
                         np.save(path, mask.astype(np.uint8))
+                        tumor_slices = np.flatnonzero(mask.any(axis=(1, 2)))
+                        middle = int(tumor_slices[len(tumor_slices) // 2])
                         patient['values'] = {'voxel_count': int(mask.sum()),
-                                             'shape': list(mask.shape), 'axis_order': 'zyx'}
+                            'volume_cm3': float(mask.sum() * np.prod(meta['spacing']) / 1000),
+                            'shape': list(mask.shape), 'axis_order': 'zyx',
+                            'spacing_mm': meta['spacing'], 'slice_index': middle,
+                            'geometry': {k: meta[k] for k in ('origin_lps_mm', 'direction_lps', 'geometry_verified')}}
+                        # Fixed lung window (-1000..400 HU), native row/column pixels.
+                        gray = (np.clip((image[middle] + 1000) / 1400, 0, 1) * 255).astype(np.uint8)
+                        rgb = np.repeat(gray[..., None], 3, axis=2)
+                        rgb[mask[middle]] = (rgb[mask[middle]] * .55 + np.array([255,100,32]) * .45).astype(np.uint8)
+                        overlay_path = directory / f'{patient_id}-overlay.png'
+                        Image.fromarray(rgb).save(overlay_path, format='PNG')
                         media_type = 'application/x-npy'
                     else:
-                        spacing = meta.get('spacing', (meta['slice_thickness'], 1.0, 1.0))
-                        values = extract_one(image, mask, spacing)
+                        spacing = meta['spacing']
+                        values = extract_one(image, mask, spacing, geometry=meta)
                         if not all(math.isfinite(value) for value in values.values()):
                             raise ValueError('Non-finite feature value')
                         patient['values'] = values
@@ -101,9 +113,16 @@ class EngineWorkspace:
                         media_type = 'application/json'
                     patient['artifacts'] = [{
                         'path': str(path.relative_to(self.path)), 'media_type': media_type,
+                        'role': 'mask' if stage == 'masks' else 'features',
                         'size_bytes': path.stat().st_size,
                         'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}]
+                    if stage == 'masks':
+                        patient['artifacts'].append({'path': str(overlay_path.relative_to(self.path)),
+                            'role': 'overlay', 'media_type': 'image/png', 'size_bytes': overlay_path.stat().st_size,
+                            'sha256': hashlib.sha256(overlay_path.read_bytes()).hexdigest()})
                 patient['status'] = 'failed' if patient['errors'] else 'success'
+            except (GeometryError, MaskError) as exc:
+                patient['errors'].append(_error(getattr(exc, 'code', 'unsupported_geometry'), str(exc)))
             except Exception as exc:
                 # Retain identity from the selection, never from a malformed header.
                 patient['errors'].append(_error('processing_failed',
