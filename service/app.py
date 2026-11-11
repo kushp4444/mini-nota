@@ -44,28 +44,49 @@ def emit(run, kind, message, payload=None):
         'kind': kind, 'message': message, 'payload': payload or {}})
     run['touched'] = time.monotonic()
 
+async def invoke_stage(stage, patient_id):
+    async with httpx.AsyncClient(timeout=300) as client:
+        response = await client.post(os.environ.get('ENGINE_URL', 'http://127.0.0.1:8001') + '/' + stage,
+            headers={'Authorization': f"Bearer {os.environ.get('ENGINE_SECRET', '')}"},
+            json={'patient_ids': [patient_id]})
+        response.raise_for_status()
+        result = response.json()
+    return result['patients'][0]
+
 async def execute(run):
-    emit(run, 'plan', f"Check {len(run['patient_ids'])} selected patients with real DICOM QC.")
+    emit(run, 'plan', f"Check {len(run['patient_ids'])} selected patients with real DICOM QC, then construct verified tumor masks for passing patients.")
     try:
         for patient_id in run['patient_ids']:
             emit(run, 'tool_call', f'QC · {patient_id}', {'stage': 'qc', 'patient_id': patient_id})
-            async with httpx.AsyncClient(timeout=300) as client:
-                response = await client.post(os.environ.get('ENGINE_URL', 'http://127.0.0.1:8001') + '/qc',
-                    headers={'Authorization': f"Bearer {os.environ.get('ENGINE_SECRET', '')}"},
-                    json={'patient_ids': [patient_id]})
-                response.raise_for_status()
-                result = response.json()
-            patient = result['patients'][0]
+            patient = await invoke_stage('qc', patient_id)
             run['patients'].append(patient)
+            run['stage_results']['qc'].append(patient)
             emit(run, 'tool_result', f"{patient_id}: QC {patient['status']}", {'stage': 'qc', 'patient': patient})
             if patient['errors']:
-                emit(run, 'error', f'{patient_id}: scan checks failed; patient excluded.', {'patient_id': patient_id, 'errors': patient['errors']})
+                emit(run, 'error', f'{patient_id}: scan checks failed; patient excluded.', {'stage': 'qc', 'patient_id': patient_id, 'errors': patient['errors']})
             emit(run, 'decision', f"{patient_id}: {'passed QC' if patient['status'] == 'success' else 'excluded from further processing'}.", {'patient_id': patient_id, 'eligible': patient['status'] == 'success'})
+        for checked in run['patients']:
+            if checked['status'] != 'success':
+                continue
+            patient_id = checked['patient_id']
+            emit(run, 'tool_call', f'Mask construction · {patient_id}', {'stage': 'masks', 'patient_id': patient_id})
+            patient = await invoke_stage('masks', patient_id)
+            run['stage_results']['masks'].append(patient)
+            if patient['status'] == 'success':
+                values = patient['values']
+                message = f"{patient_id}: mask ready · {values['voxel_count']:,} voxels · {values['volume_cm3']:.3f} cm³."
+            else:
+                message = f"{patient_id}: mask construction failed."
+            emit(run, 'tool_result', message, {'stage': 'masks', 'patient': patient})
+            if patient['errors']:
+                reasons = '; '.join(error['message'] for error in patient['errors'])
+                emit(run, 'error', f'{patient_id}: {reasons}; patient excluded.', {'stage': 'masks', 'patient_id': patient_id, 'errors': patient['errors']})
         run['status'] = 'completed'
-        emit(run, 'done', 'QC complete. Mask, feature, and scoring stages are not part of this fixture slice.', {'status': 'completed', 'selected': len(run['patient_ids']), 'passed': sum(p['status'] == 'success' for p in run['patients'])})
+        succeeded = sum(p['status'] == 'success' for p in run['stage_results']['masks'])
+        emit(run, 'done', f'QC and mask construction complete: {succeeded} masks available. Feature extraction and scoring are not yet connected.', {'status': 'completed', 'selected': len(run['patient_ids']), 'passed': sum(p['status'] == 'success' for p in run['patients']), 'masks_succeeded': succeeded})
     except Exception:
         run['status'] = 'failed'
-        emit(run, 'error', 'QC service unavailable; available patient results retained.', {'code': 'engine_unavailable'})
+        emit(run, 'error', 'Imaging service unavailable; available patient results retained.', {'code': 'engine_unavailable'})
         emit(run, 'done', 'Run failed.', {'status': 'failed'})
 
 @app.post('/runs', status_code=201)
@@ -75,7 +96,7 @@ async def create_run(selection: Selection):
     if not ids or len(ids) != len(set(ids)) or not set(ids).issubset(known):
         raise HTTPException(422, 'Select one or more distinct patients from the available catalog')
     run = {'id': str(uuid.uuid4()), 'secret': secrets.token_urlsafe(32), 'status': 'running',
-           'patient_ids': ids, 'patients': [], 'events': [], 'touched': time.monotonic()}
+           'patient_ids': ids, 'patients': [], 'stage_results': {'qc': [], 'masks': []}, 'events': [], 'touched': time.monotonic()}
     runs[run['id']] = run
     run['task'] = asyncio.create_task(execute(run))
     return {'id': run['id'], 'secret': run['secret'], 'status': run['status']}
@@ -91,7 +112,7 @@ def authorized(run_id, authorization):
 @app.get('/runs/{run_id}')
 def get_run(run_id: str, authorization: str = Header(default='')):
     run = authorized(run_id, authorization)
-    return {key: run[key] for key in ('id', 'status', 'patient_ids', 'patients', 'events')}
+    return {key: run[key] for key in ('id', 'status', 'patient_ids', 'patients', 'stage_results', 'events')}
 
 @app.get('/runs/{run_id}/events')
 async def events(run_id: str, after: int = Query(default=0, ge=0), authorization: str = Header(default='')):
@@ -102,7 +123,9 @@ async def events(run_id: str, after: int = Query(default=0, ge=0), authorization
             for event in run['events'][cursor:]:
                 yield f"id: {event['id']}\ndata: {json.dumps(event)}\n\n"
                 cursor = event['sequence']
-            if run['status'] != 'running':
+            # A producer can finish while an earlier yielded event is in flight.
+            # Drain its final batch (including done) before closing the stream.
+            if run['status'] != 'running' and cursor >= len(run['events']):
                 break
             await asyncio.sleep(0.05)
     return StreamingResponse(stream(), media_type='text/event-stream', headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'})

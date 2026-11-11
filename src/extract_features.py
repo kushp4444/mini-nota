@@ -13,7 +13,7 @@ from radiomics import featureextractor
 from . import config
 
 
-def extract_one(image_volume, mask_volume, spacing=(1.0, 1.0, 1.0)):
+def extract_one(image_volume, mask_volume, spacing, *, geometry=None):
     """Run the configured PyRadiomics pipeline on one patient.
 
     image_volume: 3D int16 CT in Hounsfield Units. mask_volume: 3D binary mask.
@@ -28,6 +28,11 @@ def extract_one(image_volume, mask_volume, spacing=(1.0, 1.0, 1.0)):
     image.SetSpacing(sitk_spacing)
     mask = sitk.GetImageFromArray(mask_volume.astype(np.uint8))
     mask.SetSpacing(sitk_spacing)
+    if geometry is not None:
+        # Both arrays share the same verified LPS origin and x/y/z directions.
+        for grid in (image, mask):
+            grid.SetOrigin(tuple(geometry['origin_lps_mm']))
+            grid.SetDirection(tuple(np.asarray(geometry['direction_lps']).ravel()))
 
     result = extractor.execute(image, mask)
     # Keep feature values; drop the diagnostics_ metadata entries
@@ -42,7 +47,7 @@ def extract_all(patient_rows, output_csv=config.FEATURES_CSV):
     records = []
     for row in patient_rows:
         feats = extract_one(row["image"], row["mask"],
-                            row.get("spacing", (1.0, 1.0, 1.0)))
+                            row["spacing"], geometry=row.get("geometry"))
         feats["patient_id"] = row["patient_id"]
         records.append(feats)
         print(f"extracted {len(feats) - 1} features for {row['patient_id']}")

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import MaskResults, { type MaskPatientResult } from "../components/MaskResults";
 type Patient = { id: string; label: string; fixture: boolean };
 type Result = {
   patient_id: string;
@@ -14,7 +15,7 @@ type Audit = {
   timestamp: string;
   kind: string;
   message: string;
-  payload: { patient?: Result; status?: string };
+  payload: { patient?: MaskPatientResult; status?: string; stage?: string };
 };
 export default function Home() {
   const [view, setView] = useState("Patients"),
@@ -22,6 +23,7 @@ export default function Home() {
     [selection, setSelection] = useState<string[]>([]),
     [events, setEvents] = useState<Audit[]>([]),
     [results, setResults] = useState<Result[]>([]),
+    [masks, setMasks] = useState<MaskPatientResult[]>([]),
     [status, setStatus] = useState("idle"),
     [error, setError] = useState("");
   useEffect(() => {
@@ -51,6 +53,7 @@ export default function Home() {
     setError("");
     setEvents([]);
     setResults([]);
+    setMasks([]);
     setStatus("running");
     setView("Analysis");
     try {
@@ -83,8 +86,12 @@ export default function Home() {
           setEvents((prev) =>
             prev.some((e) => e.id === event.id) ? prev : [...prev, event],
           );
-          if (event.kind === "tool_result" && event.payload.patient)
-            setResults((prev) => [...prev, event.payload.patient!]);
+          if (event.kind === "tool_result" && event.payload.patient) {
+            if (event.payload.stage === "qc")
+              setResults((prev) => [...prev, event.payload.patient as Result]);
+            if (event.payload.stage === "masks")
+              setMasks((prev) => [...prev, event.payload.patient!]);
+          }
           if (event.kind === "done")
             setStatus(event.payload.status || "completed");
         }
@@ -153,7 +160,7 @@ export default function Home() {
                 </h1>
                 <p>
                   {view === "Patients"
-                    ? "Select a cohort to inspect scan quality."
+                    ? "Select a cohort to inspect scan quality and tumor masks."
                     : "An auditable view of your imaging workflow."}
                 </p>
               </div>
@@ -174,7 +181,7 @@ export default function Home() {
               </div>
               <div>
                 <small>Workflow</small>
-                <strong>Real DICOM QC</strong>
+                <strong>QC → tumor masks</strong>
               </div>
             </div>
             {error && (
@@ -272,7 +279,7 @@ export default function Home() {
                   <div>
                     <small>Selected cohort</small>
                     <strong>
-                      {selection.length} patients · Quality control
+                      {selection.length} patients · QC and tumor masks
                     </strong>
                   </div>
                   <span className={`status ${status}`}>
@@ -366,6 +373,7 @@ export default function Home() {
                     </div>
                   )}
                 </div>
+                <MaskResults selectedIds={selection} results={masks} qcResults={results} />
               </>
             )}
           </section>
@@ -391,6 +399,10 @@ export default function Home() {
                 <strong>Quality control</strong>
                 <small>Selected-patient scan checks</small>
               </div>
+            </div>
+            <div className="stage-list">
+              <span>02</span>
+              <div><strong>Tumor masks</strong><small>Aligned overlays and physical volumes</small></div>
             </div>
             <div className="timeline">
               {events.length ? (
