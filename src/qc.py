@@ -29,8 +29,13 @@ def check_slice_spacing(meta, max_jitter_mm):
     return passed, f"max spacing jitter {jitter:.3f} mm (limit {max_jitter_mm})"
 
 
-def check_anonymized(first_slice, anon_tags=ANON_TAGS):
-    leaks = [t for t in anon_tags if str(getattr(first_slice, t, "")).strip()]
+def check_anonymized(first_slice, anon_tags=ANON_TAGS, *, public_patient_id=None):
+    public_ids = {f"LUNG1-{i:03}" for i in range(1, 423)}
+    public_name = (public_patient_id in public_ids
+                   and str(getattr(first_slice, "PatientID", "")) == public_patient_id
+                   and str(getattr(first_slice, "PatientName", "")) == public_patient_id)
+    leaks = [t for t in anon_tags if str(getattr(first_slice, t, "")).strip()
+             and not (t == "PatientName" and public_name)]
     passed = not leaks
     return passed, ("clean" if passed else f"possible PHI in tags: {leaks}")
 
@@ -38,13 +43,16 @@ def check_anonymized(first_slice, anon_tags=ANON_TAGS):
 def run_qc(series_dir, max_jitter_mm=config.MAX_SPACING_JITTER_MM):
     """Run every check on one series directory. Returns a dict for the audit log."""
     dcm_files = sorted(Path(series_dir).glob("*.dcm"))
-    first = pydicom.dcmread(str(dcm_files[0]))
     _, meta = load_series(series_dir)
 
     results = {"series_dir": str(series_dir), "patient_id": meta["patient_id"]}
     results["geometry"] = check_geometry(meta)
     results["slice_spacing"] = check_slice_spacing(meta, max_jitter_mm)
-    results["anonymized"] = check_anonymized(first)
+    # Check every header: a later slice must not hide an unexpected identifier.
+    checks = [check_anonymized(pydicom.dcmread(str(path), stop_before_pixels=True),
+                               public_patient_id=Path(series_dir).parent.name)
+              for path in dcm_files]
+    results["anonymized"] = next((check for check in checks if not check[0]), (True, "clean"))
     results["passed_all"] = all(v[0] for v in
                                 (results["geometry"], results["slice_spacing"],
                                  results["anonymized"]))
