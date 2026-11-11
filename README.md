@@ -76,3 +76,48 @@ mini-nota/
   *shape* of the problem, not Altis's proprietary IPRO.
 - No claim of clinical validity. The point is the engineering: clean ingestion,
   auditable QC, reproducible evaluation.
+
+### Structured imaging tools
+
+Service integrations use `src.engine.EngineWorkspace` instead of parsing CLI text:
+
+```python
+from src.engine import EngineWorkspace
+
+with EngineWorkspace("data/raw", "/tmp/mini-nota") as engine:
+    result = engine.run_stage("qc", ["LUNG1-001", "LUNG1-002"])
+    # Also available: "masks" and "features", with roi_name="GTV-1".
+    # Read/copy any artifacts under engine.path before leaving this block.
+```
+
+The designated workspace is a **parent** for a newly allocated private directory,
+not a shared output location. Context exit removes that directory on success and
+failure. Each call reads only the selected immutable library patients and writes
+only into its own workspace. Patient library entries must be real files and
+directories rather than symlinks. A workspace is owned by one invocation; use
+separate contexts for concurrent invocations.
+
+Results have `schema_version`, `stage`, `status` (`success`, `partial`, or
+`failed`), `patients`, and stage-level `errors`. Each requested patient has
+`patient_id`, `status`, `values`, `artifacts`, and named `errors`, including when
+scan parsing fails. Artifact metadata includes a workspace-relative `path`,
+`media_type`, `size_bytes`, and `sha256`. Mask arrays are stored as NumPy uint8
+arrays with `(z, y, x)` axes. Feature values and feature JSON artifacts contain
+finite numbers. Empty selections and unknown patients return structured errors;
+a patient failure does not stop the rest of the batch. Exceptions do not echo
+DICOM header values into returned errors.
+
+The existing `python -m src.pipeline` commands remain available. The reusable
+boundary calls the same scan, QC, mask, and feature functions as the CLI, without
+using its shared output files. Frozen-model scoring will be added by the model
+implementation; the reusable boundary intentionally does not expose the legacy
+CLI's per-run survival fitting. Imaging geometry validation and corrected
+physical spacing/volume/overlays are subsequent implementation work; current
+mask counts and feature outputs are intermediate results, not validated physical
+measurements.
+
+Run the deterministic contract fixtures with:
+
+```bash
+python -m unittest discover -s tests -v
+```

@@ -14,7 +14,7 @@ def list_rois(dicom_series_dir, rtstruct_path):
     """Print the named regions in an RTSTRUCT file so you can pick the tumor one."""
     builder = RTStructBuilder.create_from(
         dicom_series_path=str(dicom_series_dir),
-        rtstruct_path=str(rtstruct_path),
+        rt_struct_path=str(rtstruct_path),
     )
     names = builder.get_roi_names()
     print("ROIs found:", names)
@@ -25,7 +25,7 @@ def rtstruct_to_mask(dicom_series_dir, rtstruct_path, roi_name):
     """Rasterize one ROI's contours into a 3D numpy mask aligned with the CT."""
     builder = RTStructBuilder.create_from(
         dicom_series_path=str(dicom_series_dir),
-        rtstruct_path=str(rtstruct_path),
+        rt_struct_path=str(rtstruct_path),
     )
     mask = builder.get_roi_mask_by_name(roi_name)
     assert mask.ndim == 3 and mask.sum() > 0, f"empty mask for ROI {roi_name}"
