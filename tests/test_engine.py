@@ -143,3 +143,33 @@ class EngineContractTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class PublicPseudonymTests(unittest.TestCase):
+    def test_known_public_pseudonym_is_allowed_but_unexpected_identifiers_alarm(self):
+        import pydicom
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ct = write_scan(root / 'raw', 'LUNG1-001')
+            for path in ct.glob('*.dcm'):
+                ds = pydicom.dcmread(path)
+                ds.PatientID = ds.PatientName = 'LUNG1-001'
+                ds.save_as(path, enforce_file_format=True)
+            with EngineWorkspace(root / 'raw', root / 'work') as engine:
+                result = engine.run_stage('qc', ['LUNG1-001'])
+                self.assertEqual(result['patients'][0]['status'], 'success')
+            path = ct / '0.dcm'
+            ds = pydicom.dcmread(path)
+            ds.PatientName = 'SUSPECTED_PRIVATE_VALUE'
+            ds.save_as(path, enforce_file_format=True)
+            with EngineWorkspace(root / 'raw', root / 'work') as engine:
+                result = engine.run_stage('qc', ['LUNG1-001'])
+                self.assertEqual(result['patients'][0]['values']['anonymized']['passed'], False)
+                self.assertNotIn('SUSPECTED_PRIVATE_VALUE', json.dumps(result))
+
+            ds.PatientName = 'LUNG1-001'
+            ds.PatientBirthDate = '20000101'
+            ds.save_as(path, enforce_file_format=True)
+            with EngineWorkspace(root / 'raw', root / 'work') as engine:
+                result = engine.run_stage('qc', ['LUNG1-001'])
+                self.assertEqual(result['patients'][0]['values']['anonymized']['passed'], False)
+                self.assertNotIn('20000101', json.dumps(result))

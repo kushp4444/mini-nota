@@ -1,0 +1,28 @@
+{
+  "name": "mini-nota-web",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "next": "^16.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@apollo/server": "^5.0.0",
+    "graphql": "^16.11.0",
+    "pg": "^8.16.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/pg": "^8.15.0",
+    "@playwright/test": "^1.56.0"
+  },
+  "overrides": {
+    "@graphql-tools/utils": "13.2.2"
+  }
+}

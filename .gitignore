@@ -9,3 +9,12 @@ __pycache__/
 *.pyc
 .venv/
 *.egg-info/
+
+# Web and local configuration
+node_modules/
+.next/
+.env*
+!.env.example
+playwright-report/
+test-results/
+*.tsbuildinfo
