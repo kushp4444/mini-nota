@@ -8,7 +8,7 @@ Run API: POST `/runs` `{patient_ids:[...]}` => `{id,secret,status}`; GET `/runs/
 
 ## Local start
 
-Use the root project's shared `.venv/bin/python` from this worktree. First install requirements, `npm ci --prefix web`, and seed with `python -m scripts.seed_catalog`. PostgreSQL must be running (local URL in `.env.example`).
+Use the root project's shared `.venv/bin/python` from this worktree. First install requirements, `npm ci --prefix web`, and import the real library with `python -m scripts.seed_catalog --prepared /path/data/processed/library-v1`. Only an isolated development database should use `python -m scripts.seed_catalog --fixtures`. PostgreSQL must be running.
 
 ```
 ENGINE_SECRET=local-dev-secret RAW_DIR=/Users/kushpatel/Projects/mini-nota/data/raw python -m uvicorn service.engine_api:app --host 127.0.0.1 --port 8001
