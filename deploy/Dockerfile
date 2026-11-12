@@ -19,6 +19,7 @@ RUN cd /wheels && sha256sum -c SHA256SUMS && python -m pip install --no-index --
 WORKDIR /app
 COPY src ./src
 COPY service ./service
+COPY migrations ./migrations
 COPY scripts ./scripts
 COPY tests ./tests
 COPY docs ./docs

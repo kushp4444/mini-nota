@@ -1,4 +1,4 @@
-/** Versioned browser-only run records. No visitor state is sent to durable storage. */
+/** Versioned local History records, including downloaded artifact bytes. */
 export type Audit = {
   id: string;
   run_id: string;

@@ -520,7 +520,7 @@ export default function Home() {
               )}
             </div>
             <div className="agent-foot">
-              Temporary execution · no server run history
+              Private run access · browser-local History
             </div>
           </aside>
         </main>

@@ -1,8 +1,6 @@
-"""Temporary runner service behind the Next.js application API.
-
-Runs/events exist only in memory. There is deliberately no public run listing.
-"""
+"""Lightweight application dispatcher with optional durable PostgreSQL ownership."""
 import asyncio
+import base64
 import hmac
 import hashlib
 import json
@@ -19,11 +17,77 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from .catalog import patients, model_metadata
+from .run_repository import RunRepository, Conflict
 
 runs = {}
 launches = {}
 WORKER_CONTEXT = secrets.token_urlsafe(24)
 CHECKPOINT_LIMIT = 4_000_000
+_repositories = {}
+
+def repository():
+    url = os.environ.get('RUN_DATABASE_URL')
+    if not url:
+        return None
+    if url not in _repositories:
+        repo = RunRepository(url)
+        _repositories[url] = repo
+    return _repositories[url]
+
+def artifact_store():
+    if os.environ.get('LOCAL_ARTIFACT_DIR'):
+        from .local_artifacts import LocalArtifactStore
+        return LocalArtifactStore(os.environ['LOCAL_ARTIFACT_DIR'])
+    from .object_storage import ArtifactStore
+    return ArtifactStore.from_env(role='results')
+
+def durable_secret(run_id):
+    return hmac.new(os.environ['CHECKPOINT_SIGNING_KEY'].encode(), ('run-control:' + run_id).encode(), hashlib.sha256).hexdigest()
+
+def persist(run, **kwargs):
+    repo = repository()
+    if repo:
+        repo.publish(run, **kwargs)
+
+@asynccontextmanager
+async def control(run):
+    repo = repository()
+    if repo:
+        async with repo.control(run['id']):
+            fresh = repo.authorize(run['id'],run['secret'])
+            run.clear()
+            run.update(fresh)
+            yield
+    else:
+        async with run.setdefault('control_lock', asyncio.Lock()):
+            yield
+
+async def owned_execution(run, phase='imaging', generation=0):
+    repo = repository()
+    if repo:
+        operation = repo.operation(run['id'],phase,generation)
+        owner = 'local:' + str(uuid.uuid4())
+        fence = repo.claim(operation['id'], owner)
+        if fence is None:
+            return
+        run['_operation'] = {'id':operation['id'],'owner':owner,'fence':fence}
+    try:
+        if phase == 'imaging':
+            await execute(run)
+        else:
+            await score_run(run, checkpoint_rows(run['checkpoint']))
+    except Conflict:
+        # A concurrent cancel/control transaction fenced this worker out.
+        return
+    finally:
+        if repo and run.get('status') != 'running' and runs.get(run['id']) is run:
+            runs.pop(run['id'],None)
+
+def checkpoint_rows(checkpoint):
+    return [{'patient_id':r['patient_id'],'feature_schema':checkpoint['feature_schema'],
+             'feature_version':checkpoint['feature_version'],
+             'values':dict(zip(checkpoint['feature_schema'],r['values']))} for r in checkpoint['feature_rows']]
+
 
 def checkpoint_bytes(value):
     # IEEE-754 identity survives JSON.stringify's decimal formatting (1.0, -0,
@@ -41,10 +105,18 @@ def checkpoint_bytes(value):
         return item
     return json.dumps(normalize(value), sort_keys=True, allow_nan=False, separators=(',', ':')).encode()
 
-def checkpoint_signature(body, secret):
-    # Operator configuration survives replacement; never visitor state on disk.
+def checkpoint_signature_digest(body, digest):
     key = os.environ['CHECKPOINT_SIGNING_KEY']
-    return hmac.new(key.encode(), checkpoint_bytes(body) + b'\0' + secret.encode(), hashlib.sha256).hexdigest()
+    return hmac.new(key.encode(), checkpoint_bytes(body) + b'\0' + digest.encode(), hashlib.sha256).hexdigest()
+
+def checkpoint_signature(body, secret):
+    # Workers can sign a new gate with the stored digest without recovering
+    # the capability. Legacy raw-secret signatures remain valid on restore.
+    return checkpoint_signature_digest(body,hashlib.sha256(secret.encode()).hexdigest())
+
+def valid_checkpoint_signature(body, secret, signature):
+    legacy = hmac.new(os.environ['CHECKPOINT_SIGNING_KEY'].encode(),checkpoint_bytes(body) + b'\0' + secret.encode(),hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature,checkpoint_signature(body,secret)) or hmac.compare_digest(signature,legacy)
 
 def last_sequence(run):
     return run.get('sequence_base', 0) + len(run['events'])
@@ -79,6 +151,39 @@ def emit(run, kind, message, payload=None):
         'sequence': seq, 'timestamp': datetime.now(timezone.utc).isoformat(),
         'kind': kind, 'message': message, 'payload': payload or {}})
     run['touched'] = time.monotonic()
+    repo = repository()
+    if repo:
+        try:
+            # Upload before metadata publication. Include the operation fence in
+            # the key so a rejected writer cannot occupy another attempt's key.
+            for event in run['events']:
+                event_payload = event['payload']
+                artifacts = [*event_payload.get('artifacts',[]), *event_payload.get('patient',{}).get('artifacts',[])]
+                for index, artifact in enumerate(artifacts):
+                    if 'data_base64' in artifact:
+                        data = base64.b64decode(artifact['data_base64'],validate=True)
+                        operation = run.get('_operation',{})
+                        identity = f"{operation.get('id','restored')}-{operation.get('fence',0)}-{event['sequence']}-{index}"
+                        artifact['object_ref'] = artifact_store().publish(run['id'],identity,data,artifact.get('media_type','application/octet-stream'))
+                        artifact['url'] = f"/api/runs/{run['id']}/artifacts/{event['sequence']}/{index}"
+                        del artifact['data_base64']
+            persist(run, operation=run.get('_operation'), approve=kind == 'decision' and (payload or {}).get('action') == 'approve')
+        except Exception:
+            # A failed upload/publication must not contaminate the next audit
+            # write with unpublished stage data or an unpersisted event.
+            runtime = {key:value for key,value in run.items() if key in {'secret','task','control_lock','_operation'}}
+            saved = repo.get(run['id'])
+            run.clear()
+            run.update(saved)
+            run.update(runtime)
+            raise
+
+def public_value(value):
+    if isinstance(value,dict):
+        return {key:public_value(item) for key,item in value.items() if key != 'object_ref'}
+    if isinstance(value,list):
+        return [public_value(item) for item in value]
+    return value
 
 async def invoke_stage(stage, patient_id, run_id=None):
     async with httpx.AsyncClient(timeout=300) as client:
@@ -217,7 +322,7 @@ def build_checkpoint(run, rows, report):
             'feature_schema':rows[0]['feature_schema'],'feature_rows':compact,'eligibility':report}
     body['disclosure_id'] = hashlib.sha256(checkpoint_bytes(body)).hexdigest()
     body['last_sequence'] = last_sequence(run) + 1
-    body['signature'] = checkpoint_signature(body, run['secret'])
+    body['signature'] = checkpoint_signature(body,run['secret']) if 'secret' in run else checkpoint_signature_digest(body,run['_secret_digest'])
     return body
 
 
@@ -268,7 +373,7 @@ class Approval(BaseModel):
 @app.post('/runs/{run_id}/approve')
 async def approve_run(run_id: str, approval: Approval, authorization: str = Header(default='')):
     run = authorized(run_id, authorization)
-    async with run.setdefault('control_lock',asyncio.Lock()):
+    async with control(run):
         checkpoint = run.get('checkpoint')
         if not checkpoint or approval.disclosure_id != checkpoint['disclosure_id'] or approval.model_version != checkpoint['model_version']:
             raise HTTPException(409,'Approval does not match the disclosed cohort and model')
@@ -291,7 +396,9 @@ async def approve_run(run_id: str, approval: Approval, authorization: str = Head
         run['status'] = 'running'
         emit(run,'decision','Anonymous run approval recorded for the disclosed cohort and frozen model.',
              {'action':'approve','disclosure_id':approval.disclosure_id,'model_version':approval.model_version,'report':report,'status':'running'})
-        run['task'] = asyncio.create_task(score_run(run,rows))
+        if os.environ.get('EXECUTION_BACKEND','local') == 'local':
+            runs[run['id']] = run
+            run['task'] = asyncio.create_task(owned_execution(run,'scoring',run['gate_generation']))
         return {'id':run_id,'status':run['status']}
 
 
@@ -320,9 +427,16 @@ async def create_run(selection: Selection):
     if nonce and (len(nonce) < 32 or len(nonce) > 128 or not all(c.isalnum() or c in '-_' for c in nonce)):
         raise HTTPException(422, 'Invalid launch recovery nonce')
     run_id = hashlib.sha256(nonce.encode()).hexdigest()[:32] if nonce else str(uuid.uuid4())
-    if nonce and selection.worker_context != WORKER_CONTEXT:
+    repo = repository()
+    if repo:
+        existing = repo.authorize(run_id, durable_secret(run_id))
+        if existing:
+            if existing['patient_ids'] != ids:
+                raise HTTPException(409,'Launch nonce was already used for a different selection')
+            return {'id':existing['id'],'secret':existing['secret'],'status':existing['status']}
+    if not repo and nonce and selection.worker_context != WORKER_CONTEXT:
         await stop_lost_launch(run_id)
-    old = launches.get(nonce) if nonce else None
+    old = launches.get(nonce) if nonce and not repo else None
     if old:
         if old['patient_ids'] != ids:
             raise HTTPException(409, 'Launch nonce was already used for a different selection')
@@ -335,20 +449,36 @@ async def create_run(selection: Selection):
         raise HTTPException(422, 'Select one or more distinct patients from the available catalog')
     model = await asyncio.to_thread(model_metadata)
     # Recheck after all lookups: concurrent retries create only one task.
-    if nonce and nonce in launches:
+    if not repo and nonce and nonce in launches:
         return await create_run(selection)
-    run = {'id': run_id, 'secret': secrets.token_urlsafe(32), 'status': 'running',
+    run = {'id': run_id, 'secret': durable_secret(run_id) if repo else secrets.token_urlsafe(32), 'status': 'running',
            'patient_ids': ids, 'patients': [], 'model':model, 'eligibility':None, 'checkpoint':None, 'evaluation':None, 'stage_results': {'qc': [], 'masks': [], 'features': [], 'score': []}, 'events': [], 'touched': time.monotonic()}
-    runs[run['id']] = run
-    if nonce:
+    if repo:
+        try:
+            run, created = repo.create(run,nonce)
+        except Conflict as exc:
+            raise HTTPException(409,str(exc))
+        if not created:
+            return {'id':run['id'],'secret':run['secret'],'status':run['status']}
+    if not repo or os.environ.get('EXECUTION_BACKEND','local') == 'local':
+        runs[run['id']] = run
+    if nonce and not repo:
         launches[nonce] = {'id': run['id'], 'patient_ids': list(ids)}
-    run['task'] = asyncio.create_task(execute(run))
+    if os.environ.get('EXECUTION_BACKEND','local') == 'local':
+        run['task'] = asyncio.create_task(owned_execution(run))
     return {'id': run['id'], 'secret': run['secret'], 'status': run['status']}
 
 def authorized(run_id, authorization):
-    run = runs.get(run_id)
+    repo = repository()
+    if repo:
+        try:
+            run = repo.authorize(run_id,authorization.removeprefix('Bearer '))
+        except PermissionError:
+            raise HTTPException(403,'Run access denied')
+    else:
+        run = runs.get(run_id)
     if run is None:
-        raise HTTPException(404, 'Temporary run unavailable')
+        raise HTTPException(404, 'Run unavailable')
     if not hmac.compare_digest(authorization, f"Bearer {run['secret']}"):
         raise HTTPException(403, 'Run access denied')
     return run
@@ -367,8 +497,7 @@ async def restore_run(request: Request, authorization: str = Header(default=''))
         checkpoint = json.loads(raw)['checkpoint']
         body = {k:v for k,v in checkpoint.items() if k != 'signature'}
         secret = authorization.removeprefix('Bearer ')
-        if not authorization.startswith('Bearer ') or not secret or not hmac.compare_digest(
-                checkpoint['signature'], checkpoint_signature(body, secret)):
+        if not authorization.startswith('Bearer ') or not secret or not valid_checkpoint_signature(body,secret,checkpoint['signature']):
             raise ValueError('signature')
         fields = {'version','generation','run_id','patient_ids','model_version','feature_version',
                   'feature_schema','feature_rows','eligibility','disclosure_id','last_sequence'}
@@ -405,20 +534,23 @@ async def restore_run(request: Request, authorization: str = Header(default=''))
     except (ValueError, TypeError, KeyError, AttributeError, OverflowError, RecursionError):
         raise HTTPException(422, invalid)
     # No await between checking ownership and publishing the recovered run.
-    existing = runs.get(run['id'])
+    existing = authorized(run['id'],authorization) if repository() and repository().get(run['id']) else runs.get(run['id'])
     if existing is not None:
         authorized(run['id'], authorization)
         if existing.get('checkpoint',{}).get('disclosure_id') != body['disclosure_id']:
             raise HTTPException(409, 'A newer disclosure exists; reconnect and review the current gate')
         return {'id':existing['id'],'status':existing['status']}
-    runs[run['id']] = run
+    if repository():
+        run, _ = repository().create(run,phase=None)
+    else:
+        runs[run['id']] = run
     return {'id':run['id'],'status':run['status']}
 
 @app.get('/runs/{run_id}')
 def get_run(run_id: str, authorization: str = Header(default='')):
     run = authorized(run_id, authorization)
-    return {**{key: run[key] for key in ('id', 'status', 'patient_ids', 'patients', 'stage_results', 'events', 'model', 'eligibility', 'checkpoint', 'evaluation')},
-            'sequence_base':run.get('sequence_base',0),'last_sequence':last_sequence(run)}
+    return public_value({**{key: run[key] for key in ('id', 'status', 'patient_ids', 'patients', 'stage_results', 'events', 'model', 'eligibility', 'checkpoint', 'evaluation')},
+            'sequence_base':run.get('sequence_base',0),'last_sequence':last_sequence(run)})
 
 @app.get('/runs/{run_id}/events')
 async def events(run_id: str, after: int = Query(default=0, ge=0), authorization: str = Header(default='')):
@@ -428,8 +560,10 @@ async def events(run_id: str, after: int = Query(default=0, ge=0), authorization
     async def stream():
         cursor = after
         while True:
+            if repository():
+                run.update(authorized(run_id,authorization))
             for event in run['events'][max(0,cursor-run.get('sequence_base',0)):]:
-                yield f"id: {event['id']}\ndata: {json.dumps(event)}\n\n"
+                yield f"id: {event['id']}\ndata: {json.dumps(public_value(event))}\n\n"
                 cursor = event['sequence']
             # A producer can finish while an earlier yielded event is in flight.
             # Drain its final batch (including done) before closing the stream.
@@ -455,8 +589,9 @@ def event_page(run_id: str, after: int = Query(default=0, ge=0),
         payload = item['payload']
         artifacts = [*payload.get('artifacts', []), *payload.get('patient', {}).get('artifacts', [])]
         for index, artifact in enumerate(artifacts):
-            if artifact.pop('data_base64', None) is not None:
+            if artifact.pop('data_base64', None) is not None or 'object_ref' in artifact:
                 artifact['url'] = f"/api/runs/{run_id}/artifacts/{event['sequence']}/{index}"
+        item = public_value(item)
         encoded_size = len(json.dumps(item).encode())
         if size + encoded_size > 512_000:
             if not page:
@@ -479,7 +614,7 @@ def artifact_bytes(run_id: str, sequence: int, index: int, authorization: str = 
         payload = run['events'][sequence - run.get('sequence_base',0) - 1]['payload']
         artifacts = [*payload.get('artifacts', []), *payload.get('patient', {}).get('artifacts', [])]
         artifact = artifacts[index]
-        data = base64.b64decode(artifact['data_base64'], validate=True)
+        data = artifact_store().read(run_id,artifact['object_ref']) if 'object_ref' in artifact else base64.b64decode(artifact['data_base64'], validate=True)
     except (IndexError, KeyError, ValueError):
         raise HTTPException(404, 'Generated artifact bytes are no longer available')
     return Response(data, media_type=artifact.get('media_type', 'application/octet-stream'),
@@ -488,12 +623,17 @@ def artifact_bytes(run_id: str, sequence: int, index: int, authorization: str = 
 @app.post('/runs/{run_id}/cancel')
 async def cancel_run(run_id: str, authorization: str = Header(default='')):
     run = authorized(run_id, authorization)
-    async with run.setdefault('control_lock', asyncio.Lock()):
+    async with control(run):
         if run['status'] in ('completed', 'failed', 'canceled'):
             return {'id': run_id, 'status': run['status']}
         # Freeze the run before awaiting the private engine: late responses cannot
         # append results or advance it while the process termination is in flight.
         run['status'] = 'canceling'
+        persist(run,cancel=True)
+        if repository() and any(not owner['owner'].startswith('local:') for owner in repository().active_owners(run_id)):
+            # #18 supplies provider cancellation/reconciliation. Local engine
+            # acknowledgement cannot prove a remote invocation has stopped.
+            raise HTTPException(503,'Remote worker stop is not confirmed; cancellation intent is saved')
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 response = await client.post(os.environ.get('ENGINE_URL', 'http://127.0.0.1:8001') + f'/operations/{run_id}/cancel',
@@ -502,7 +642,7 @@ async def cancel_run(run_id: str, authorization: str = Header(default='')):
         except Exception:
             # Do not claim that computation stopped if the worker did not confirm.
             raise HTTPException(503, 'Cancellation not confirmed by imaging worker; retry cancellation')
-        task = run.get('task')
+        task = runs.get(run_id,run).get('task')
         if task and not task.done():
             task.cancel()
             try:
@@ -511,6 +651,8 @@ async def cancel_run(run_id: str, authorization: str = Header(default='')):
                 pass
         run['status'] = 'canceled'
         emit(run, 'done', 'Run canceled by visitor; available results retained.', {'status': 'canceled', 'reason': 'Canceled by visitor'})
+        if repository():
+            runs.pop(run_id,None)
         return {'id': run_id, 'status': 'canceled'}
 
 

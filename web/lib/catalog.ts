@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool({ connectionString: process.env.CATALOG_DATABASE_URL ?? process.env.DATABASE_URL });
 export async function patients() {
   const { rows } = await pool.query(
     "SELECT patient_id AS id, label, fixture FROM patient_catalog ORDER BY patient_id",
