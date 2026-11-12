@@ -239,7 +239,7 @@ export default function Home() {
                     : "An auditable view of your imaging workflow."}
                 </p>
               </div>
-              <span className="tag">DEVELOPMENT FIXTURE</span>
+              <span className="tag">{catalog.some((p) => p.fixture) ? "DEVELOPMENT FIXTURE" : "FROZEN HELD-OUT LIBRARY"}</span>
             </div>
             <div className="card overview">
               <div>

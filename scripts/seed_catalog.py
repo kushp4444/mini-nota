@@ -34,6 +34,9 @@ def import_prepared_catalog(prepared_dir, *, database_url=DATABASE_URL):
     with psycopg.connect(database_url) as conn:
         _create_tables(conn)
         conn.execute('LOCK TABLE patient_catalog IN ACCESS EXCLUSIVE MODE')
+        existing = conn.execute('SELECT partition_sha256 FROM catalog_metadata WHERE singleton').fetchone()
+        if existing and existing[0] != catalog['partition_sha256']:
+            raise ValueError('Catalog is already frozen to a different partition; provision a separately versioned database')
         conn.execute('DELETE FROM patient_catalog')
         for row in sorted(rows, key=lambda p: p['id']):
             conn.execute('INSERT INTO patient_catalog VALUES (%s,%s,false)', (row['id'], row['label']))

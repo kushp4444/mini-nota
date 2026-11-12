@@ -37,6 +37,14 @@ def test_frozen_catalog_is_idempotent_and_server_rejects_development(tmp_path, m
         with pytest.raises(ValueError):
             import_prepared_catalog(tmp_path, database_url=isolated)
         assert [p['id'] for p in catalog.patients()] == ['LUNG1-002']
+        # Even an internally valid alternate split cannot silently replace a frozen catalog.
+        partition = {'development': ['LUNG1-002'], 'held_out': ['LUNG1-001']}
+        (tmp_path / 'partition.json').write_text(json.dumps(partition))
+        (tmp_path / 'catalog.json').write_text(json.dumps({'partition_sha256': hashlib.sha256((tmp_path / 'partition.json').read_bytes()).hexdigest(),
+            'patients': [{'id': 'LUNG1-001', 'fixture': False, 'label': 'Alternate partition'}]}))
+        with pytest.raises(ValueError, match='already frozen'):
+            import_prepared_catalog(tmp_path, database_url=isolated)
+        assert [p['id'] for p in catalog.patients()] == ['LUNG1-002']
     finally:
         with psycopg.connect(url) as conn:
             conn.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)))
