@@ -214,7 +214,7 @@ export default function Home() {
         <header>
           <span>▥</span> {view}
           <div className="header-right">
-            <i /> Public Lung1 · fixture library
+            <i /> Public Lung1 · {catalog.some((p) => p.fixture) ? "fixture library" : "held-out library"}
           </div>
         </header>
         <div className="disclaimer">
@@ -239,7 +239,7 @@ export default function Home() {
                     : "An auditable view of your imaging workflow."}
                 </p>
               </div>
-              <span className="tag">DEVELOPMENT FIXTURE</span>
+              <span className="tag">{catalog.some((p) => p.fixture) ? "DEVELOPMENT FIXTURE" : "FROZEN HELD-OUT LIBRARY"}</span>
             </div>
             <div className="card overview">
               <div>
@@ -308,7 +308,9 @@ export default function Home() {
                   <div>
                     <h2>Patients</h2>
                     <p>
-                      Clearly labeled fixtures · not the final held-out library
+                      {catalog.some((p) => p.fixture)
+                        ? "Clearly labeled fixtures · not the final held-out library"
+                        : `${catalog.length} frozen held-out patients · excluded from model development`}
                     </p>
                   </div>
                   <span>{selection.length} selected</span>
@@ -358,7 +360,7 @@ export default function Home() {
                         </td>
                         <td>Public Lung1</td>
                         <td>
-                          <span className="fixture">Fixture</span>
+                          <span className="fixture">{p.fixture ? "Fixture" : "Held-out"}</span>
                         </td>
                       </tr>
                     ))}
