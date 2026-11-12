@@ -7,10 +7,15 @@ const server = new ApolloServer({
     type ModelMetadata {
       model_version: String!, feature_version: String!, feature_schema: [String!]!,
       development_count: Int!, held_out_count: Int!, partition_sha256: String!,
-      reference_count: Int!, reference_median: Float!, score_definition: String!
+      reference_count: Int!, reference_median: Float!, score_definition: String!, evaluation: Evaluation, percentile_rule: String, reference_cohort: String
     }
-    type RiskScore { patient_id: ID!, risk_score: Float!, model_version: String!, feature_version: String!, score_definition: String! }
-    type RunResults { id: ID!, status: String!, patient_ids: [ID!]!, model_version: String, scores: [RiskScore!]! }
+    type Exclusion { patient_id: ID!, code: String!, message: String! }
+    type Point { time: Float!, survival: Float! }
+    type Curve { group: String!, count: Int!, events: Int!, points: [Point!]! }
+    type Uncertainty { context: String!, method: String, interval: [Float!], estimable_samples: Int, unestimable_samples: Int, requested_samples: Int }
+    type Evaluation { evaluation_version: String, model_version: String, scope: String, c_index: Float, evaluated_count: Int, selected_count: Int, held_out_count: Int, event_count: Int, censored_count: Int, unavailable_reason: String, method: String, time_unit: String, curves: [Curve!], curve_context: String, exclusions: [Exclusion!], uncertainty: Uncertainty }
+    type RiskScore { patient_id: ID!, risk_score: Float!, model_version: String!, feature_version: String!, score_definition: String!, risk_percentile: Float, risk_group: String }
+    type RunResults { id: ID!, status: String!, patient_ids: [ID!]!, model_version: String, scores: [RiskScore!]!, evaluation: Evaluation }
     type Query { patients: [Patient!]!, modelMetadata: ModelMetadata, runResults(id: ID!): RunResults! }
   `,
   resolvers: { Query: { patients, modelMetadata,

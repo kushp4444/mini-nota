@@ -20,17 +20,19 @@ def test_missing_outcome_is_named_without_removing_scoreable_patient(tmp_path):
     scored = run_model_tool('score',[row],model.version,tmp_path/'model.json',tmp_path/'outcomes.csv')
     assert scored['patients'][0]['patient_id']==ids[60]
     assert scored['patients'][0]['status']=='success'
+    assert scored['patients'][0]['values']['risk_percentile'] >= 0
+    assert scored['evaluation']['evaluated_count']==0
+    assert scored['evaluation']['c_index'] is None
 
 
-def test_score_rejects_changed_outcome_disclosure_before_computing_scores(tmp_path):
+def test_scoring_rejects_outcome_changes_after_disclosed_eligibility(tmp_path):
     import pytest
     from src.frozen_model import ModelError
     ids=fixture_library(tmp_path)
     train_model(tmp_path,tmp_path/'model.json',folds=3)
     model=FrozenModel(tmp_path/'model.json')
-    row={'patient_id':ids[60],'feature_version':model.bundle['feature_version'],'feature_schema':['signal','noise','constant'],'values':{'signal':1.,'noise':0.,'constant':1.}}
-    report=run_model_tool('eligibility',[row],model.version,tmp_path/'model.json',tmp_path/'outcomes.csv')
-    outcomes=pd.read_csv(tmp_path/'outcomes.csv')
-    outcomes[outcomes.patient_id!=ids[60]].to_csv(tmp_path/'outcomes.csv',index=False)
+    rows=[{'patient_id':ids[60],'feature_version':model.bundle['feature_version'],'feature_schema':['signal','noise','constant'],'values':{'signal':1.,'noise':0.,'constant':1.}}]
+    report=run_model_tool('eligibility',rows,model.version,tmp_path/'model.json',tmp_path/'outcomes.csv')
+    outcomes=pd.read_csv(tmp_path/'outcomes.csv');outcomes[outcomes.patient_id!=ids[60]].to_csv(tmp_path/'outcomes.csv',index=False)
     with pytest.raises(ModelError,match='Eligibility changed'):
-        run_model_tool('score',[row],model.version,tmp_path/'model.json',tmp_path/'outcomes.csv',expected_eligibility=report)
+        run_model_tool('score',rows,model.version,tmp_path/'model.json',tmp_path/'outcomes.csv',expected_eligibility=report)
