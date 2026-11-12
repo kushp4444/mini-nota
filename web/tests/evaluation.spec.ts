@@ -38,8 +38,10 @@ test('fixed held-out evaluation stays visible beside a one-patient exploratory r
   await page.getByRole('button',{name:'History',exact:true}).click();
   await page.getByRole('button',{name:`Open run ${saved.id}`,exact:true}).click();
   await expect(page.getByLabel('Selected cohort exploratory evaluation',{exact:true}).getByRole('img')).toBeVisible();
+  await page.route('**/api/**',route=>route.abort());
   await page.reload();
   await page.getByRole('button',{name:'History',exact:true}).click();
   await page.getByRole('button',{name:`Open run ${saved.id}`,exact:true}).click();
   await expect(page.getByLabel('Selected cohort exploratory evaluation',{exact:true}).getByRole('img')).toBeVisible();
+  await expect(page.getByLabel('Full held-out evaluation',{exact:true}).getByText('0.606',{exact:true})).toBeVisible();
 });
