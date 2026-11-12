@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Build pinned Linux amd64 wheelhouse and runtime
-        run: docker build --platform linux/amd64 -f deploy/Dockerfile -t mini-nota:ci .
+        run: docker build --platform linux/amd64 --target ci -f deploy/Dockerfile -t mini-nota:ci .
       - name: Full synthetic imaging, model, API and owner lifecycle suite
         run: >-
           docker run --rm --network host --read-only --cap-drop ALL
