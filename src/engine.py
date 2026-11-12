@@ -14,6 +14,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from .qc import run_qc
+from .feature_contract import feature_version
 from .dicom_loader import load_series, GeometryError
 from .masks import rtstruct_to_mask, MaskError
 from PIL import Image
@@ -110,6 +111,7 @@ class EngineWorkspace:
                             raise ValueError('Non-finite feature value')
                         patient['values'] = values
                         patient['feature_schema'] = list(values)
+                        patient['feature_version'] = feature_version(list(values))
                         csv_path = directory / f'{patient_id}.csv'
                         with csv_path.open('w', newline='') as stream:
                             writer = csv.DictWriter(stream, fieldnames=['patient_id', *values])

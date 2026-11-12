@@ -6,6 +6,15 @@ import socket
 import subprocess
 import sys
 import time
+import uuid
+import numpy as np
+import pandas as pd
+from psycopg import sql
+from psycopg.conninfo import make_conninfo
+from service import catalog
+from src.frozen_model import train_model
+from src.engine import EngineWorkspace
+from scripts.import_model import import_model
 import httpx
 import psycopg
 import pydicom
@@ -21,6 +30,7 @@ from test_features import varied_tumor
 def client(tmp_path_factory):
     root = tmp_path_factory.mktemp('api-dicom')
     varied_tumor(root, 'TEST-CLEAN')
+    varied_tumor(root, 'TEST-MISSING')
     physical_tumor(root, 'TEST-CONSTANT')
     write_scan(root, 'TEST-NO-MASK')
     ct = write_scan(root, 'TEST-PRIVACY')
@@ -35,15 +45,36 @@ def client(tmp_path_factory):
     ds.save_as(ct / '3.dcm', enforce_file_format=True)
     ct = write_scan(root, 'TEST-GEOMETRY')
     for path in list(ct.glob('*.dcm'))[1:]: path.unlink()
-    ids = ['TEST-CONSTANT','TEST-NO-MASK','TEST-CLEAN','TEST-PRIVACY','TEST-BROKEN','TEST-SPACING','TEST-GEOMETRY']
+    ids = ['TEST-MISSING','TEST-CONSTANT','TEST-NO-MASK','TEST-CLEAN','TEST-PRIVACY','TEST-BROKEN','TEST-SPACING','TEST-GEOMETRY']
+    schema = 'test_service_' + uuid.uuid4().hex
     with psycopg.connect(DATABASE_URL) as conn:
+        conn.execute(sql.SQL('CREATE SCHEMA {}').format(sql.Identifier(schema)))
+    isolated = make_conninfo(DATABASE_URL,options=f'-c search_path={schema}')
+    previous_db = catalog.DATABASE_URL
+    previous_env_db = os.environ.get('DATABASE_URL')
+    os.environ['DATABASE_URL'] = isolated
+    catalog.DATABASE_URL = isolated
+    with psycopg.connect(isolated) as conn:
+        conn.execute('CREATE TABLE patient_catalog(patient_id text PRIMARY KEY,label text NOT NULL,fixture boolean NOT NULL)')
         for pid in ids:
             conn.execute('INSERT INTO patient_catalog VALUES (%s,%s,true) ON CONFLICT DO NOTHING', (pid,'Automated test fixture'))
+    with EngineWorkspace(root,root/'workspaces') as engine:
+        names = engine.run_stage('features',['TEST-CLEAN'])['patients'][0]['feature_schema']
+    rng = np.random.default_rng(122)
+    dev = [f'MODEL-DEV-{i}' for i in range(40)]
+    pd.DataFrame([{'patient_id':pid,**dict(zip(names,rng.normal(size=len(names))))} for pid in dev+ids]).to_csv(root/'features.csv',index=False)
+    pd.DataFrame({'patient_id':dev+ids,'duration':rng.uniform(1,100,len(dev+ids)),'event':1,'time_unit':'days'}).to_csv(root/'outcomes.csv',index=False)
+    (root/'feature_schema.json').write_text(json.dumps(names))
+    (root/'partition.json').write_text(json.dumps({'development':dev,'held_out':ids}))
+    train_model(root,root/'model.json',folds=2,penalties=(1.,))
+    import_model(root/'model.json',database_url=isolated)
+    outcome_rows=pd.read_csv(root/'outcomes.csv')
+    outcome_rows[outcome_rows.patient_id!='TEST-MISSING'].to_csv(root/'outcomes.csv',index=False)
     with socket.socket() as s:
         s.bind(('127.0.0.1',0)); port = s.getsockname()[1]
     old = {k: os.environ.get(k) for k in ('ENGINE_SECRET','ENGINE_URL')}
     os.environ.update(ENGINE_SECRET='test-engine-secret',ENGINE_URL=f'http://127.0.0.1:{port}')
-    proc = subprocess.Popen([sys.executable,'-m','uvicorn','service.engine_api:app','--port',str(port)],env={**os.environ,'RAW_DIR':str(root)},stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    proc = subprocess.Popen([sys.executable,'-m','uvicorn','service.engine_api:app','--port',str(port)],env={**os.environ,'RAW_DIR':str(root),'MODEL_BUNDLE':str(root/'model.json'),'OUTCOMES_CSV':str(root/'outcomes.csv')},stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     try:
         for _ in range(100):
             try:
@@ -52,8 +83,11 @@ def client(tmp_path_factory):
         with TestClient(app) as c: yield c
     finally:
         proc.terminate();proc.wait(timeout=10)
+        catalog.DATABASE_URL = previous_db
+        if previous_env_db is None: os.environ.pop('DATABASE_URL',None)
+        else: os.environ['DATABASE_URL'] = previous_env_db
         with psycopg.connect(DATABASE_URL) as conn:
-            conn.execute('DELETE FROM patient_catalog WHERE patient_id = ANY(%s)',(ids,))
+            conn.execute(sql.SQL('DROP SCHEMA {} CASCADE').format(sql.Identifier(schema)))
         for k,v in old.items():
             if v is None: os.environ.pop(k,None)
             else: os.environ[k]=v
@@ -74,7 +108,7 @@ def test_real_qc_retains_all_patients_and_emits_ordered_private_events(client):
     assert events[0]['kind']=='plan' and events[-1]['kind']=='done'
     assert {'plan','tool_call','tool_result','decision','error','done'} <= {e['kind'] for e in events}
     run=client.get(url,headers=headers).json()
-    assert run['status']=='completed'
+    assert run['status']=='failed'
     assert [p['patient_id'] for p in run['patients']]==['TEST-CLEAN','TEST-PRIVACY','TEST-BROKEN']
     clean,private,broken=run['patients']
     assert all(clean['values'][key]['passed'] for key in ('geometry','slice_spacing','anonymized'))
@@ -238,7 +272,8 @@ def test_features_are_progressive_portable_and_retain_partial_failures(client):
     feature_events = [e for e in result['events'] if e['kind']=='tool_result' and e['payload'].get('stage')=='features']
     assert [e['payload']['patient']['patient_id'] for e in feature_events] == ['TEST-CONSTANT','TEST-CLEAN']
     assert any(e['kind']=='error' and e['payload'].get('stage')=='features' and e['payload']['patient_id']=='TEST-CONSTANT' for e in result['events'])
-    assert 'Frozen-model scoring is not yet connected' in result['events'][-1]['message']
+    assert result['stage_results']['score'] == []
+    assert result['events'][-1]['payload']['code'] == 'approval_required'
     assert 'NaN' not in response.text
 
 
@@ -295,3 +330,41 @@ def test_expired_launch_nonce_never_silently_restarts_computation(client):
             assert retry.json()['detail']['code'] == 'launch_interrupted'
     finally:
         proc.terminate();proc.wait(timeout=10)
+
+
+def test_clean_one_patient_runs_all_four_real_tools_without_live_fit(client):
+    run = client.post('/runs',json={'patient_ids':['TEST-CLEAN']}).json()
+    headers={'Authorization':f"Bearer {run['secret']}"};url=f"/runs/{run['id']}"
+    client.get(url+'/events',headers=headers)
+    result=client.get(url,headers=headers).json()
+    assert result['status']=='completed'
+    assert [e['payload']['stage'] for e in result['events'] if e['kind']=='tool_call']==['qc','masks','features','eligibility','score']
+    scored=result['stage_results']['score']
+    assert [p['patient_id'] for p in scored]==['TEST-CLEAN']
+    assert scored[0]['values']['model_version']==result['model']['model_version']
+    assert result['eligibility']['scoring_eligible']==['TEST-CLEAN']
+
+
+def test_scoring_results_query_is_private_and_consistent_with_stage_results(client):
+    run=client.post('/runs',json={'patient_ids':['TEST-CLEAN']}).json()
+    url=f"/runs/{run['id']}";headers={'Authorization':f"Bearer {run['secret']}"}
+    client.get(url+'/events',headers=headers)
+    assert client.get(url+'/results').status_code==403
+    results=client.get(url+'/results',headers=headers).json()
+    assert results['status']=='completed'
+    assert results['scores'][0]['patient_id']=='TEST-CLEAN'
+    snapshot=client.get(url,headers=headers).json()
+    assert results['scores'][0]['risk_score']==snapshot['stage_results']['score'][0]['values']['risk_score']
+
+
+def test_missing_outcome_preserves_features_and_stops_before_score_for_approval(client):
+    run=client.post('/runs',json={'patient_ids':['TEST-CLEAN','TEST-MISSING']}).json()
+    url=f"/runs/{run['id']}";headers={'Authorization':f"Bearer {run['secret']}"}
+    client.get(url+'/events',headers=headers)
+    result=client.get(url,headers=headers).json()
+    assert result['status']=='failed'
+    assert result['stage_results']['score']==[]
+    assert result['eligibility']['scoring_eligible']==['TEST-CLEAN','TEST-MISSING']
+    assert result['eligibility']['evaluation_eligible']==['TEST-CLEAN']
+    assert result['eligibility']['evaluation_exclusions'][0]['patient_id']=='TEST-MISSING'
+    assert not any(e['kind']=='tool_call' and e['payload'].get('stage')=='score' for e in result['events'])

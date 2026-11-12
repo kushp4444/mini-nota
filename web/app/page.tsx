@@ -1,4 +1,5 @@
 "use client";
+import ScoreResults from "../components/ScoreResults";
 import MaskResults, { type MaskPatientResult } from "../components/MaskResults";
 import FeatureResults, { type FeaturePatientResult } from "../components/FeatureResults";
 import { useEffect, useRef, useState } from "react";
@@ -277,7 +278,7 @@ export default function Home() {
               </div>
               <div>
                 <small>Workflow</small>
-                <strong>QC → masks → features</strong>
+                <strong>QC → masks → features → scoring</strong>
               </div>
             </div>
             {browserBusy && !activeRun.current && <p role="status">A run is already active or awaiting approval in this browser. Return to its tab to finish or cancel it.</p>}
@@ -408,7 +409,7 @@ export default function Home() {
                   <div>
                     <small>Selected cohort</small>
                     <strong>
-                      {selection.length} patients · QC, masks and features
+                      {selection.length} patients · QC, masks, features and scoring
                     </strong>
                   </div>
                   <span className={`status ${status}`}>
@@ -504,6 +505,7 @@ export default function Home() {
                 </div>
                 <MaskResults selectedIds={selection} results={masks} qcResults={results} />
                 <FeatureResults selectedIds={selection} results={features} qcResults={results} maskResults={masks} />
+                <ScoreResults selectedIds={selection} events={events} />
               </>
             )}
           </section>
@@ -535,6 +537,7 @@ export default function Home() {
               <div><strong>Tumor masks</strong><small>Aligned overlays and physical volumes</small></div>
             </div>
             <div className="stage-list"><span>03</span><div><strong>Radiomic features</strong><small>Real quantitative measurements</small></div></div>
+            <div className="stage-list"><span>04</span><div><strong>Frozen model scoring</strong><small>Fixed development model · no live fitting</small></div></div>
             <div className="timeline">
               {displayedEvents.length ? (
                 displayedEvents.map((e) => (
