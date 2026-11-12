@@ -1,123 +1,47 @@
-# mini-nota
+# Mini-Nota
 
-A toy-scale replica of Altis Labs' IPRO pipeline: CT scans in, survival prediction out.
+**Architecture migration checkpoint:** the owner has now selected Vercel + Render Free dispatcher + Neon Free + Cloudflare R2 + Modal Functions, with saved results in Neon/R2. The implementation and measurements below describe the pre-migration browser-local baseline. The approved persistence/hosting migration is pending; `deploy/` preserves the earlier single-host candidate and must not be treated as the new deployment plan.
 
-**What this is:** a proof of work showing the *shape* of imaging-based survival
-prediction — DICOM ingestion + QC, radiomic feature extraction, survival analysis —
-built on public lung-cancer data. It mirrors the engineering problems Altis hires for:
-data quality at ingest, reproducible feature pipelines, rigorous model evaluation.
+Mini-Nota is an unauthenticated public-data imaging workflow demonstration: select held-out Lung1 patients, inspect scan checks, tumor masks, 72 radiomic measurements and frozen-model risk rankings, and review the actual tool calls and decisions. Patients, Analysis, browser-local History and immediately viewable curated examples share a NOTA-inspired workspace. This independent project is not affiliated with Altis Labs, a medical device or medical advice.
 
-**What it is not:** medical advice, a clinical tool, a reproduction of Altis's
-proprietary model, or affiliated with Altis Labs in any way.
+The actual prepared collection contains 422 inventoried patients, 8 objective pre-partition processing exclusions and 414 usable patients. The frozen split has **332 development / 82 held-out** patients; only held-out patients are selectable, all selected by default. Live execution never trains a model. Model **`cox-v1-a8e2738d012902a6f717`** uses a fixed development reference for percentiles and higher/lower model-risk groups. Its independent 82-patient held-out Harrell c-index is **0.6057961981925833**, with 95% patient-bootstrap interval **[0.5326564103414366, 0.6739709514124799]**. These finite-cohort results do not establish clinical validity. Scores and percentiles are relative rankings, not death probabilities or lifespans.
 
-## The pipeline
+Next.js/TypeScript supplies the browser UI, GraphQL and same-origin control proxy. A separate long-lived Python runner invokes a private FastAPI imaging engine; PostgreSQL holds only immutable catalog/model/evaluation metadata. Visitor runs, audit events and generated artifacts persist in **browser IndexedDB only**. The server owns temporary computation and cleans temporary files. A stable operator signing key permits browser-saved approval checkpoints to resume after worker replacement without a retention deadline. Closing a tab does not cancel work; confirmed cancellation stops the owned tool. Results that never reached the browser may be lost on interruption. Clearing browser data loses local History.
 
-1. **Ingest + QC** (`src/dicom_loader.py`, `src/qc.py`) — load DICOM series into 3D
-   volumes, validate slice geometry / spacing / anonymization, write an audit log.
-2. **Masks** (`src/masks.py`) — convert the doctor-drawn RTSTRUCT tumor outlines into
-   3D binary masks aligned with the CT volume.
-3. **Features** (`src/extract_features.py`) — PyRadiomics extracts ~100+ shape, texture,
-   and intensity measurements per tumor → `outputs/features.csv`.
-4. **Survival** (`src/survival.py`) — Cox proportional-hazards model via `lifelines`;
-   concordance index + Kaplan-Meier curves → `outputs/kaplan_meier.png`.
+## Local setup
 
-## Data
-
-Public **NSCLC-Radiomics** collection from The Cancer Imaging Archive (TCIA):
-CT scans + survival outcomes + tumor segmentations for ~422 lung cancer patients.
-See `data/README.md` for download instructions. Raw data is git-ignored — never commit it.
-
-## Setup
+Use CPython **3.14.7** and the recorded measurement versions. Install requirements together; the exact measured candidate runtime is in `deploy/requirements-runtime.txt`:
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+.venv/bin/python -m pip install -r deploy/requirements-runtime.txt
+cd web
+npm ci
 ```
 
-## Run (start small, then scale)
+Obtain and prepare the public dataset using [data/README.md](data/README.md), [preparation handoff](docs/ticket-6-handoff.md), [model handoff](docs/ticket-7-handoff.md) and [evaluation handoff](docs/ticket-8-handoff.md). Large source/prepared images and model bundles are ignored by Git. Keep the existing frozen partition/model unchanged when reproducing this release. Import catalog, model and evaluation explicitly with operator database credentials, then serve using a separate read-only identity as described in [deploy/README.md](deploy/README.md).
+
+Configure backend environment using [deploy/backend.env.example](deploy/backend.env.example): `DATABASE_URL`, `RAW_DIR`, `MODEL_BUNDLE`, `OUTCOMES_CSV`, private `ENGINE_SECRET` and a stable random `CHECKPOINT_SIGNING_KEY` of at least 32 characters. Keep keys outside Git. From the repository root:
 
 ```bash
-# 1. QC a 30-patient subset while iterating
-python -m src.pipeline --stage qc --data data/raw --subset 30
-
-# 2. Build tumor masks
-python -m src.pipeline --stage masks --data data/raw --subset 30
-
-# 3. Extract radiomic features
-python -m src.pipeline --stage features --data data/raw --subset 30
-
-# 4. Survival analysis -> outputs/kaplan_meier.png
-python -m src.pipeline --stage survival
+.venv/bin/python -m service.backend
 ```
 
-## Project layout
+Configure `web/.env.local` from [web/.env.example](web/.env.example), using the read-only database and `RUNNER_URL=http://127.0.0.1:8000`. From `web`, run `npm run dev`; production verification uses `npm run build -- --webpack` then `npm run start`. No secrets need a `NEXT_PUBLIC_` prefix. Static curated examples remain viewable even without a live backend and explicitly identify introduced fixture faults.
 
-```
-mini-nota/
-├── src/
-│   ├── config.py            # paths, thresholds, constants
-│   ├── dicom_loader.py      # DICOM series -> 3D numpy volume (Hounsfield units)
-│   ├── qc.py                # geometry / spacing / anonymization checks + audit log
-│   ├── masks.py             # RTSTRUCT contours -> 3D binary tumor mask
-│   ├── extract_features.py  # PyRadiomics -> features CSV
-│   ├── survival.py          # Cox model + Kaplan-Meier (lifelines)
-│   └── pipeline.py          # CLI entry point tying the stages together
-├── data/
-│   └── README.md            # how to download the TCIA dataset (data itself is ignored)
-├── outputs/                 # features.csv, QC log, KM plot (git-ignored)
-├── pyradiomics_config.yaml  # which features to extract and how
-└── requirements.txt
-```
-
-## Honest limitations
-
-- Toy scale, public data, open-source features — this demonstrates understanding of the
-  *shape* of the problem, not Altis's proprietary IPRO.
-- No claim of clinical validity. The point is the engineering: clean ingestion,
-  auditable QC, reproducible evaluation.
-
-### Structured imaging tools
-
-Service integrations use `src.engine.EngineWorkspace` instead of parsing CLI text:
-
-```python
-from src.engine import EngineWorkspace
-
-with EngineWorkspace("data/raw", "/tmp/mini-nota") as engine:
-    result = engine.run_stage("qc", ["LUNG1-001", "LUNG1-002"])
-    # Also available: "masks" and "features", with roi_name="GTV-1".
-    # Read/copy any artifacts under engine.path before leaving this block.
-```
-
-The designated workspace is a **parent** for a newly allocated private directory,
-not a shared output location. Context exit removes that directory on success and
-failure. Each call reads only the selected immutable library patients and writes
-only into its own workspace. Patient library entries must be real files and
-directories rather than symlinks. A workspace is owned by one invocation; use
-separate contexts for concurrent invocations.
-
-Results have `schema_version`, `stage`, `status` (`success`, `partial`, or
-`failed`), `patients`, and stage-level `errors`. Each requested patient has
-`patient_id`, `status`, `values`, `artifacts`, and named `errors`, including when
-scan parsing fails. Artifact metadata includes a workspace-relative `path`,
-`media_type`, `size_bytes`, and `sha256`. Mask arrays are stored as NumPy uint8
-arrays with `(z, y, x)` axes. Feature values and feature JSON artifacts contain
-finite numbers. Empty selections and unknown patients return structured errors;
-a patient failure does not stop the rest of the batch. Exceptions do not echo
-DICOM header values into returned errors.
-
-The existing `python -m src.pipeline` commands remain available. The reusable
-boundary calls the same scan, QC, mask, and feature functions as the CLI, without
-using its shared output files. Frozen-model scoring will be added by the model
-implementation; the reusable boundary intentionally does not expose the legacy
-CLI's per-run survival fitting. Imaging geometry validation and corrected
-physical spacing/volume/overlays are subsequent implementation work; current
-mask counts and feature outputs are intermediate results, not validated physical
-measurements.
-
-Run the deterministic contract fixtures with:
+## Verification and deployment
 
 ```bash
-python -m unittest discover -s tests -v
+# Repository root; fixture Postgres configured via DATABASE_URL.
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 .venv/bin/python -m pytest tests -q
+# web/; production frontend and actual held-out backend running.
+npm run build -- --webpack
+npx tsc --noEmit
+WEB_URL=http://localhost:3000 npx playwright test
 ```
+
+API tests isolate their PostgreSQL schemas. Browser tests label synthetic fixtures; workflow/scoring/evaluation checks require the real 82-patient catalog and immutable imaging/model assets. No synthetic result is a full-library performance measurement.
+
+See [release runbook](deploy/README.md) for the Vercel frontend, read-only database initialization, immutable held-out-only asset manifest, pinned Linux image build, single-owner supervisor, tmpfs cleanup, payload bounds and hosted verification gates. See [release evidence](docs/ticket-15-handoff.md) for measured local execution and precise external blockers. Public deployment and Linux numerical parity require actual target verification before the demo is declared ready.
+
+The original offline CLI (`python -m src.pipeline`) remains available for development; its legacy survival fitting is separate from the hosted frozen-model workflow. Numerical geometry, measurement and survival behavior are documented in `docs/ticket-4-handoff.md` through `docs/ticket-8-handoff.md`.

@@ -97,9 +97,10 @@ async def run_stage(stage, selection, authorization):
     try:
         with tempfile.TemporaryDirectory(prefix='mini-nota-tool-') as workspace:
             native_env = {**os.environ, **{name:os.environ.get(name,'1') for name in ('OPENBLAS_NUM_THREADS','OMP_NUM_THREADS','VECLIB_MAXIMUM_THREADS','ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS')}}
-            process = await asyncio.create_subprocess_exec(sys.executable, '-m', os.environ.get('ENGINE_WORKER_MODULE', 'service.engine_worker'),
+            process = await asyncio.create_subprocess_exec(sys.executable, '-m', 'service.tool_entry',
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL, start_new_session=True, env=native_env)
+                stderr=asyncio.subprocess.DEVNULL, start_new_session=True, env=native_env,
+                pass_fds=(int(os.environ['MINI_NOTA_LIFETIME_FD']),) if os.environ.get('MINI_NOTA_LIFETIME_FD') else ())
             operation['process'] = process
             if operation['status'] == 'canceled':
                 await stop(process)

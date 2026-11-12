@@ -1,0 +1,42 @@
+name: Release Linux fixture verification
+on:
+  push:
+    branches: [codex/mini-nota-mvp]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres@sha256:43f9275df91e012c3da3d86bea5d7bb5e67a473296cc906c5f9e80b8176b1a37
+        env:
+          POSTGRES_USER: mini_nota
+          POSTGRES_DB: mini_nota
+          POSTGRES_PASSWORD: ci-fixture-only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U mini_nota -d mini_nota"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Build pinned Linux amd64 wheelhouse and runtime
+        run: docker build --platform linux/amd64 -f deploy/Dockerfile -t mini-nota:ci .
+      - name: Full synthetic imaging, model, API and owner lifecycle suite
+        run: >-
+          docker run --rm --network host --read-only --cap-drop ALL
+          --security-opt no-new-privileges
+          --tmpfs /run/mini-nota:rw,nosuid,nodev,uid=10001,gid=10001,mode=0700,size=1g
+          --env ASSET_MANIFEST=
+          --env TMPDIR=/run/mini-nota
+          --env DATABASE_URL=postgresql://mini_nota:ci-fixture-only@127.0.0.1:5432/mini_nota
+          --entrypoint python mini-nota:ci -m pytest tests -q -p no:cacheprovider
+      - name: Report reproducibility contract
+        run: |
+          docker image inspect mini-nota:ci --format '{{.Id}} {{.Architecture}} {{.Os}}'
+          docker run --rm --entrypoint cat mini-nota:ci /runtime-packages.txt
+          docker run --rm --entrypoint cat mini-nota:ci /wheels/SHA256SUMS
+# No data/model download, visitor output or browser profile is uploaded.
+# A passing fixture build does not establish real frozen-model Linux parity.

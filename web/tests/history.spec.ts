@@ -371,6 +371,7 @@ test("feature and survival stage values and data artifacts remain inspectable af
   await page.getByRole("button", {name: "History", exact: true}).click();
   await page.getByRole("button", {name: /Open run fixture-1/}).click();
   const results = page.getByRole("region", {name: "Saved run results"});
+  await results.getByText("Structured stage details",{exact:true}).click();
   await expect(results.getByText(/original_shape_Sphericity/)).toContainText("0.72");
   await expect(results.getByText(/synthetic-v1/)).toContainText("63.2");
   await expect(results.getByText(/synthetic-v1/)).toContainText("No comparable pairs");

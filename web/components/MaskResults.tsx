@@ -9,17 +9,18 @@ export type MaskPatientResult = {
 };
 
 /** Render retained stage values and bytes; no expiring server URLs. */
-export default function MaskResults({ selectedIds, results, qcResults }: {
+export default function MaskResults({ selectedIds, results, qcResults, ended=false }: {
   selectedIds: string[];
   results: MaskPatientResult[];
   qcResults: MaskPatientResult[];
+  ended?:boolean;
 }) {
   return <div className="card results" aria-label="Tumor masks">
     <div className="card-heading">
       <div><h2>Tumor masks</h2><p>Verified CT geometry · physical tumor volume</p></div>
       <span>{results.filter(r => r.status === "success").length} masks ready</span>
     </div>
-    <div className="patient-results">
+    {!results.length && !qcResults.length ? <p className="stage-empty">Tumor measurements and overlays appear after scan checks.</p> : <div className="patient-results" tabIndex={0} role="region" aria-label="Patient tumor masks">
       {selectedIds.map(id => {
         const patient = results.find(r => r.patient_id === id);
         const qc = qcResults.find(r => r.patient_id === id);
@@ -31,8 +32,8 @@ export default function MaskResults({ selectedIds, results, qcResults }: {
         const ratio = shape && spacing ? shape[2] * spacing[2] / (shape[1] * spacing[1]) : 1;
         return <article key={id} className="patient-result">
           <div className="patient-heading"><strong>{id}</strong>
-            <span className={`status ${excluded ? "failed" : patient?.status || "pending"}`}>
-              {excluded ? "Excluded by QC" : patient?.status || "Pending"}
+            <span className={`status ${excluded ? "failed" : patient?.status || (ended?"not-run":"pending")}`}>
+              {excluded ? "Excluded by QC" : patient?.status || (ended?"Not run":"Pending")}
             </span>
           </div>
           {patient?.status === "success" && values ? <>
@@ -52,10 +53,10 @@ export default function MaskResults({ selectedIds, results, qcResults }: {
               </figcaption>
             </figure> : <p className="error-text">Overlay bytes are unavailable for this result.</p>}
           </> : <p className={patient?.errors.length ? "error-text" : "muted"}>
-            {patient?.errors.length ? patient.errors.map(e => e.message).join("; ") : excluded ? "This patient did not pass scan checks and was not sent to mask construction." : "Waiting for mask construction after scan checks…"}
+            {patient?.errors.length ? patient.errors.map(e => e.message).join("; ") : excluded ? "This patient did not pass scan checks and was not sent to mask construction." : ended ? "No mask result was saved before the run ended." : "Waiting for mask construction after scan checks…"}
           </p>}
         </article>;
       })}
-    </div>
+    </div>}
   </div>;
 }

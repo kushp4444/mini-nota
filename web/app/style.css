@@ -714,3 +714,14 @@ footer span {
 .example-launch > div { flex:1 1 250px; }
 .example-launch p { color:var(--muted); margin:8px 0 0; line-height:1.5; }
 .example-secondary { border:1px solid #dce1e0; background:white; padding:11px 16px; border-radius:5px; cursor:pointer; font:inherit; }
+
+/* Keep full-cohort controls and evidence within bounded, keyboard-scrollable regions. */
+.catalog-scroll { max-height: 420px; overflow: auto; }
+.catalog-scroll thead { position: sticky; top: 0; z-index: 2; }
+.patient-results { max-height: 620px; overflow: auto; }
+.score-table { max-height: 360px; overflow: auto; }
+.score-table thead { position: sticky; top: 0; z-index: 1; }
+.stage-empty { padding: 18px 24px; margin: 0 0 20px; color: #718078; }
+.agent { position: sticky; top: 20px; }
+@media (max-width: 1100px) { .agent { position: static; } }
+.saved-stage { max-height: 360px; overflow: auto; }

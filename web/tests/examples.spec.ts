@@ -9,7 +9,7 @@ test('curated execution is immediately inspectable without launching a visitor r
   await expect(page.getByRole('region', {name:'Saved run results'})).toBeVisible();
   await expect(page.getByRole('table', {name:'Patient risk scores'})).toBeVisible();
   await expect(page.getByText('Not a medical device or medical advice.', {exact:false})).toBeVisible();
-  await expect(page.getByRole('img', {name:'LUNG1-002 overlay'})).toBeVisible();
+  await expect(page.getByRole('img', {name:'LUNG1-002 tumor mask overlay on middle tumor-bearing CT slice'})).toBeVisible();
   await page.getByRole('button', {name:'Inspect LUNG1-009',exact:true}).click();
   await expect(page.getByRole('heading', {name:'LUNG1-009 feature details'})).toBeVisible();
   const timeline = page.locator('.timeline .event');

@@ -39,9 +39,9 @@ test("real held-out patient receives frozen model score and retains it in Histor
   expect(scored.scores[0].risk_score).toBe(saved.events.find((e:any)=>e.payload.stage==='score'&&e.kind==='tool_result').payload.patient.values.risk_score);
   await page.getByRole('button',{name:'History',exact:true}).click();
   await page.getByRole('button',{name:`Open run ${saved.id}`,exact:true}).click();
-  await expect(page.getByText('risk_score',{exact:false}).first()).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Model risk scores',exact:true})).toBeVisible();
   await page.reload();
   await page.getByRole('button',{name:'History',exact:true}).click();
   await page.getByRole('button',{name:`Open run ${saved.id}`,exact:true}).click();
-  await expect(page.getByText('risk_score',{exact:false}).first()).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Model risk scores',exact:true})).toBeVisible();
 });

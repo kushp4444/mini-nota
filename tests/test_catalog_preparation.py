@@ -11,6 +11,7 @@ from service.app import app
 
 
 def test_frozen_catalog_is_idempotent_and_server_rejects_development(tmp_path, monkeypatch):
+    monkeypatch.setenv("CHECKPOINT_SIGNING_KEY", "catalog-fixture-signing-key-" + "x" * 48)
     from scripts.seed_catalog import import_prepared_catalog
     schema = 'test_catalog_' + uuid.uuid4().hex
     url = catalog.DATABASE_URL

@@ -1,7 +1,8 @@
 "use client";
 import { loadExample, type Example } from "../lib/examples";
 import ApprovalGate from "../components/ApprovalGate";
-import ScoreResults from "../components/ScoreResults";
+import ScoreResults, { HeldOutBenchmark } from "../components/ScoreResults";
+import QCResults from "../components/QCResults";
 import MaskResults, { type MaskPatientResult } from "../components/MaskResults";
 import FeatureResults, { type FeaturePatientResult } from "../components/FeatureResults";
 import { useEffect, useRef, useState } from "react";
@@ -114,10 +115,10 @@ export default function Home() {
   async function displayRun(run: SavedRun) {
     setEvents(run.events);
     setStatus(run.status);
-    setFeatures(run.events.filter(e => e.kind === "tool_result" && e.payload.stage === "features" && e.payload.patient).map(e => e.payload.patient));
+    const featurePatients = structuredClone(run.events.filter(e => e.kind === "tool_result" && e.payload.stage === "features" && e.payload.patient).map(e => e.payload.patient));
     setResults(run.events.filter(e => e.kind === "tool_result" && e.payload.stage === "qc").map(e => e.payload.patient));
     const patients = structuredClone(run.events.filter(e => e.kind === "tool_result" && e.payload.stage === "masks").map(e => e.payload.patient));
-    for (const patient of patients) {
+    for (const patient of [...patients,...featurePatients]) {
       for (const artifact of patient.artifacts || []) {
         const savedArtifact = run.artifacts.find(a => a.patientId === patient.patient_id && a.role === artifact.role && a.blob);
         if (savedArtifact?.blob) artifact.data_base64 = await new Promise<string>(resolve => {
@@ -128,6 +129,7 @@ export default function Home() {
       }
     }
     setMasks(patients);
+    setFeatures(featurePatients);
   }
   async function follow(run: SavedRun) {
     connection.current?.abort();
@@ -376,6 +378,17 @@ export default function Home() {
                   </div>
                   <span>{selection.length} selected</span>
                 </div>
+                <div className="table-footer">
+                  <span>{catalog.length} available patients</span>
+                  <button
+                    className="primary"
+                    disabled={recoveringHistory || !selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}
+                    onClick={start}
+                  >
+                    Run analysis <span>→</span>
+                  </button>
+                </div>
+                <div className="catalog-scroll" tabIndex={0} role="region" aria-label="Held-out patient selection">
                 <table>
                   <thead>
                     <tr>
@@ -427,16 +440,8 @@ export default function Home() {
                     ))}
                   </tbody>
                 </table>
-                <div className="table-footer">
-                  <span>{catalog.length} available patients</span>
-                  <button
-                    className="primary"
-                    disabled={recoveringHistory || !selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}
-                    onClick={start}
-                  >
-                    Run analysis <span>→</span>
-                  </button>
                 </div>
+
               </div>
             ) : (
               <>
@@ -452,97 +457,13 @@ export default function Home() {
                     {status === "idle" ? "Ready to run" : status}
                   </span>
                 </div>
-                <div className="card results">
-                  <div className="card-heading">
-                    <div>
-                      <h2>Scan quality</h2>
-                      <p>Geometry, slice spacing, and anonymization</p>
-                    </div>
-                    <span>
-                      {results.length} / {selection.length} checked
-                    </span>
-                  </div>
-                  {!events.length ? (
-                    <div className="empty">
-                      <div className="empty-icon">▥</div>
-                      <h2>
-                        {status === "running"
-                          ? "Checking your selected cohort"
-                          : "Ready when you are"}
-                      </h2>
-                      <p>
-                        {status === "running"
-                          ? "Waiting for the first scan result."
-                          : "Start a run to see real patient checks arrive here."}
-                      </p>
-                      <button
-                        className="primary"
-                        onClick={start}
-                        disabled={recoveringHistory || !selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}
-                      >
-                        Run analysis →
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="patient-results">
-                      {selection.map((id) => {
-                        const result = results.find((r) => r.patient_id === id);
-                        return (
-                          <article className="patient-result" key={id}>
-                            <div className="patient-heading">
-                              <strong>{id}</strong>
-                              <span
-                                className={`status ${result?.status || "pending"}`}
-                              >
-                                {result?.status || "Pending"}
-                              </span>
-                            </div>
-                            {result ? (
-                              <>
-                                <div className="checks">
-                                  {[
-                                    "geometry",
-                                    "slice_spacing",
-                                    "anonymized",
-                                  ].map((check) => (
-                                    <div key={check}>
-                                      <small>{check.replace("_", " ")}</small>
-                                      <strong
-                                        className={
-                                          result.values[check]?.passed
-                                            ? "pass"
-                                            : "fail"
-                                        }
-                                      >
-                                        {result.values[check]
-                                          ? result.values[check].passed
-                                            ? "✓ Passed"
-                                            : "! Flagged"
-                                          : "Unavailable"}
-                                      </strong>
-                                      <p>{result.values[check]?.detail}</p>
-                                    </div>
-                                  ))}
-                                </div>
-                                {result.errors.map((e, i) => (
-                                  <p className="error-text" key={i}>
-                                    {e.message}
-                                  </p>
-                                ))}
-                              </>
-                            ) : (
-                              <p className="muted">Waiting for scan checks…</p>
-                            )}
-                          </article>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-                <MaskResults selectedIds={selection} results={masks} qcResults={results} />
-                <FeatureResults selectedIds={selection} results={features} qcResults={results} maskResults={masks} />
+                <HeldOutBenchmark events={events} />
+                {!events.length && <div className="card stage-empty"><p>Start a run to see real patient checks arrive here.</p><button className="primary" onClick={start} disabled={recoveringHistory || !selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}>Run analysis →</button></div>}
+                <QCResults selectedIds={selection} results={results} ended={terminal(status)} />
+                <MaskResults selectedIds={selection} results={masks} qcResults={results} ended={terminal(status)} />
+                <FeatureResults selectedIds={selection} results={features} qcResults={results} maskResults={masks} ended={terminal(status)} />
                 {activeRun.current && <ApprovalGate run={activeRun.current} onApprove={approveCurrent} />}
-                <ScoreResults selectedIds={selection} events={events} />
+                <ScoreResults selectedIds={selection} events={events} showBenchmark={false} />
               </>
             )}
           </section>

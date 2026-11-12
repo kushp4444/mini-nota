@@ -1,0 +1,74 @@
+{
+  "elapsed_seconds": 578.989,
+  "status": "completed",
+  "selected": 82,
+  "model": "cox-v1-a8e2738d012902a6f717",
+  "event_count": 662,
+  "stages": {
+    "qc": {
+      "count": 82,
+      "success": 82,
+      "first": "2026-11-12T14:38:23.922154+00:00",
+      "last": "2026-11-12T14:39:29.868274+00:00"
+    },
+    "masks": {
+      "count": 82,
+      "success": 82,
+      "first": "2026-11-12T14:39:30.770595+00:00",
+      "last": "2026-11-12T14:40:53.084588+00:00"
+    },
+    "features": {
+      "count": 82,
+      "success": 82,
+      "first": "2026-11-12T14:41:00.741434+00:00",
+      "last": "2026-11-12T14:47:26.278670+00:00"
+    },
+    "score": {
+      "count": 82,
+      "success": 82,
+      "first": "2026-11-12T14:47:29.657033+00:00",
+      "last": "2026-11-12T14:47:29.657190+00:00"
+    }
+  },
+  "artifacts": 246,
+  "artifact_bytes": 11740695,
+  "artifact_blobs": 246,
+  "artifact_errors": 0,
+  "largest_event_page_bytes": 15246,
+  "largest_artifact_response_bytes": 185729,
+  "largest_blob_bytes": 185729,
+  "live_vs_prepared_max_absolute_risk_difference": 1.1102230246251565e-16,
+  "live_vs_prepared_exact_equal_count": 33,
+  "context": "Pre-migration local Darwin arm64, CPython3.14.7; actual newly extracted held-out imaging, not fixture or hosted/Linux verification.",
+  "evaluation": {
+    "c_index": 0.6057961981925833,
+    "evaluated_count": 82,
+    "event_count": 73,
+    "censored_count": 9,
+    "time_unit": "days",
+    "exclusions": [],
+    "fixed_group_counts": {
+      "lower model risk": 43,
+      "higher model risk": 39
+    }
+  },
+  "resources": {
+    "peak_sampled_backend_process_tree_rss_bytes": 2366668800,
+    "peak_sampled_temporary_logical_file_bytes": 29248238,
+    "limitations": "Sampling began partway through full82; RSS includes owner runner/engine descendants and overlapping real one-patient regression runs on the same isolated service. 1s file sampling missed brief writes; separate1ms sampling during late extraction observed the stated lower bound. Neither value is a deployment memory or temp allocation guarantee."
+  },
+  "raw_assets": {
+    "patients": 82,
+    "files": 10246,
+    "logical_bytes": 5459320394,
+    "manifest_sha256": "afb52b9c96b756890f4050f0f3b02157bc2618fa4892dfd68cbd0f6f4b637217",
+    "verified_total_files": 10251
+  },
+  "unverified": [
+    "Public deployment",
+    "Target Linux native build and real numerical parity",
+    "Full82 approval-checkpoint payload through hosted proxy",
+    "Valid full82 results payload byte count (temporary owner record expired before later query)",
+    "New Render/Neon/R2/Modal architecture and durable persistence migration"
+  ]
+}
