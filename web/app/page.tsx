@@ -2,6 +2,8 @@
 import MaskResults, { type MaskPatientResult } from "../components/MaskResults";
 import { useEffect, useRef, useState } from "react";
 import History from "../components/History";
+import CancelRun from "../components/CancelRun";
+import { browserRun, watchBrowserRun, reserveBrowserRun, attachBrowserRun, releaseBrowserRun } from "../lib/browser-run";
 import {
   Audit,
   SavedRun,
@@ -32,8 +34,13 @@ export default function Home() {
     [savedSelection, setSavedSelection] = useState<SavedRun>(),
     [storageError, setStorageError] = useState(""),
     [saved, setSaved] = useState(false),
-    [unfinished, setUnfinished] = useState<SavedRun>();
+    [unfinished, setUnfinished] = useState<SavedRun>(),
+    [browserBusy, setBrowserBusy] = useState(false);
   const activeRun = useRef<SavedRun | undefined>(undefined);
+  useEffect(() => watchBrowserRun(() => {
+    try { setBrowserBusy(Boolean(browserRun())); }
+    catch { setBrowserBusy(true); setError('Browser storage is unavailable; runs cannot be safely coordinated across tabs.'); }
+  }), []);
   useEffect(() => {
     readRuns()
       .then((runs) => {
@@ -43,7 +50,9 @@ export default function Home() {
       .catch((e) => setStorageError(storageMessage(e)));
   }, []);
   async function persist(run: SavedRun) {
+    if (activeRun.current?.id === run.id && terminal(activeRun.current.status) && !terminal(run.status)) return;
     activeRun.current = run;
+    if (terminal(run.status)) releaseBrowserRun(run.id);
     setSaved(false);
     try {
       await saveRun(run);
@@ -81,6 +90,9 @@ export default function Home() {
       setError("Select at least one available patient.");
       return;
     }
+    let reservation: string;
+    try { reservation = await reserveBrowserRun(); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Unable to coordinate runs in this browser.'); return; }
     setError("");
     setSaved(false);
     activeRun.current = undefined;
@@ -96,7 +108,8 @@ export default function Home() {
         body: JSON.stringify({ patient_ids: selection }),
       });
       const run = await created.json();
-      if (!created.ok) throw Error(run.detail || "Unable to start run");
+      if (!created.ok) { releaseBrowserRun(reservation); throw Error(run.detail || "Unable to start run"); }
+      attachBrowserRun(reservation, run.id);
       await persist(createSavedRun(run, selection));
       const response = await fetch(`/api/runs/${run.id}/events`, {
         headers: { Authorization: `Bearer ${run.secret}` },
@@ -140,6 +153,23 @@ export default function Home() {
         current && !terminal(current.status) ? "interrupted" : "failed",
       );
     }
+  }
+  async function cancelCurrent() {
+    const run = activeRun.current;
+    if (!run || terminal(run.status)) return;
+    const headers = { Authorization: `Bearer ${run.secret}` };
+    const response = await fetch(`/api/runs/${run.id}/cancel`, { method: 'POST', headers });
+    if (!response.ok) throw Error('Cancellation was not confirmed. Please retry; processing may still be active.');
+    const snapshot = await fetch(`/api/runs/${run.id}`, { headers });
+    if (!snapshot.ok) throw Error('Work stopped, but its final results could not be collected. Retry to retain the final record.');
+    const result = await snapshot.json();
+    for (const event of result.events || []) {
+      if (activeRun.current?.id !== run.id) return;
+      await persist(await captureEvent(activeRun.current, event));
+    }
+    setEvents(activeRun.current?.events || []);
+    setStatus(activeRun.current?.status || result.status);
+    setUnfinished(undefined);
   }
   return (
     <div className="shell">
@@ -224,6 +254,8 @@ export default function Home() {
                 <strong>QC → tumor masks</strong>
               </div>
             </div>
+            {browserBusy && !activeRun.current && <p role="status">A run is already active or awaiting approval in this browser. Return to its tab to finish or cancel it.</p>}
+            {activeRun.current && !terminal(activeRun.current.status) && <CancelRun onConfirm={cancelCurrent} />}
             {error && (
               <div role="alert" className="error">
                 {error}
@@ -331,7 +363,7 @@ export default function Home() {
                   <span>{catalog.length} available patients</span>
                   <button
                     className="primary"
-                    disabled={!selection.length || status === "running"}
+                    disabled={!selection.length || browserBusy || status === "running"}
                     onClick={start}
                   >
                     Run analysis <span>→</span>
@@ -378,7 +410,7 @@ export default function Home() {
                       <button
                         className="primary"
                         onClick={start}
-                        disabled={!selection.length || status === "running"}
+                        disabled={!selection.length || browserBusy || status === "running"}
                       >
                         Run analysis →
                       </button>

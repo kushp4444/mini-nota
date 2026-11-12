@@ -1,36 +1,115 @@
-"""Private engine service. Bind loopback or protect with ENGINE_SECRET externally."""
+"""Private HTTP adapter owning ephemeral, truly cancellable engine subprocesses."""
+import asyncio
+import json
 import os
-import base64
+import signal
+import sys
 import tempfile
+import time
+import uuid
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
-from src.engine import EngineWorkspace
 
-app = FastAPI(docs_url=None, redoc_url=None)
+@asynccontextmanager
+async def lifespan(app):
+    yield
+    for operation in list(operations.values()):
+        operation['status'] = 'canceled'
+        await stop(operation['process'])
+
+app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
+operations = {}
+# Cancellation tombstones prevent a delayed HTTP invocation from restarting work.
+# They contain opaque operation IDs only and are discarded with worker memory.
+CANCEL_RETENTION_SECONDS = 3600
+
+
 class Selection(BaseModel):
     patient_ids: list[str]
+    operation_id: str | None = None
 
-@app.post('/qc')
-def qc(selection: Selection, authorization: str = Header(default='')):
-    return run_stage('qc', selection, authorization)
 
-@app.post('/masks')
-def masks(selection: Selection, authorization: str = Header(default='')):
-    return run_stage('masks', selection, authorization)
-
-def run_stage(stage, selection, authorization):
+def authorize(authorization):
     secret = os.environ.get('ENGINE_SECRET')
     if not secret or authorization != f'Bearer {secret}':
         raise HTTPException(403, 'Engine access denied')
-    with EngineWorkspace(os.environ['RAW_DIR'], tempfile.gettempdir()) as engine:
-        result = engine.run_stage(stage, selection.patient_ids)
-        for patient in result['patients']:
-            retained = []
-            for artifact in patient['artifacts']:
-                # The raw working mask is large and private; retain the display PNG.
-                if artifact.get('role') == 'mask':
-                    continue
-                data = (engine.path / artifact['path']).read_bytes()
-                retained.append({**artifact, 'data_base64': base64.b64encode(data).decode('ascii')})
-            patient['artifacts'] = retained
-        return result
+
+
+def prune():
+    for key, operation in list(operations.items()):
+        if operation['status'] != 'running' and time.monotonic() - operation['touched'] > CANCEL_RETENTION_SECONDS:
+            del operations[key]
+
+
+async def stop(process):
+    if process:
+        # A whole process group is owned by this operation, including any tool
+        # descendants. SIGKILL also stops native numerical code without waiting
+        # for Python to reach an asyncio cancellation point.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        await process.wait()
+
+
+@app.post('/qc')
+async def qc(selection: Selection, authorization: str = Header(default='')):
+    return await run_stage('qc', selection, authorization)
+
+
+@app.post('/masks')
+async def masks(selection: Selection, authorization: str = Header(default='')):
+    return await run_stage('masks', selection, authorization)
+
+
+@app.post('/operations/{operation_id}/cancel')
+async def cancel(operation_id: str, authorization: str = Header(default='')):
+    authorize(authorization)
+    prune()
+    was_running = operation_id in operations and operations[operation_id]['status'] == 'running'
+    operation = operations.setdefault(operation_id, {'status': 'canceled', 'process': None,
+        'touched': time.monotonic(), 'finished': asyncio.Event()})
+    operation['status'] = 'canceled'
+    operation['touched'] = time.monotonic()
+    await stop(operation['process'])
+    # Wait until the request owner has cleaned its temporary workspace.
+    if was_running:
+        await operation['finished'].wait()
+    return {'status': 'canceled'}
+
+
+async def run_stage(stage, selection, authorization):
+    authorize(authorization)
+    prune()
+    operation_id = selection.operation_id or str(uuid.uuid4())
+    old = operations.get(operation_id)
+    if old and old['status'] == 'canceled':
+        raise HTTPException(409, 'Operation canceled')
+    if old and old['status'] == 'running':
+        raise HTTPException(409, 'Operation already running')
+    operation = {'status': 'running', 'process': None, 'touched': time.monotonic(), 'finished': asyncio.Event()}
+    operations[operation_id] = operation
+    try:
+        with tempfile.TemporaryDirectory(prefix='mini-nota-tool-') as workspace:
+            process = await asyncio.create_subprocess_exec(sys.executable, '-m', os.environ.get('ENGINE_WORKER_MODULE', 'service.engine_worker'),
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
+            operation['process'] = process
+            if operation['status'] == 'canceled':
+                await stop(process)
+                raise HTTPException(409, 'Operation canceled')
+            stdout, _ = await process.communicate(json.dumps({'stage': stage,
+                'patient_ids': selection.patient_ids, 'raw_dir': os.environ['RAW_DIR'], 'workspace': workspace}).encode())
+            if operation['status'] == 'canceled':
+                raise HTTPException(409, 'Operation canceled')
+            if process.returncode:
+                raise HTTPException(502, 'Imaging subprocess failed')
+            return json.loads(stdout)
+    finally:
+        await stop(operation['process'])
+        if operation['status'] != 'canceled':
+            operation['status'] = 'finished'
+        operation['touched'] = time.monotonic()
+        operation['finished'].set()

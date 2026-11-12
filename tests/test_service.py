@@ -117,3 +117,66 @@ def test_masks_follow_qc_and_keep_portable_overlay_bytes_and_named_failures(clie
     calls = [e['payload'] for e in result['events'] if e['kind'] == 'tool_call' and e['payload'].get('stage') == 'masks']
     assert [e['patient_id'] for e in calls] == ['TEST-NO-MASK','TEST-CLEAN']
     assert any(e['kind']=='error' and e['payload'].get('stage')=='masks' and e['payload']['patient_id']=='TEST-NO-MASK' for e in result['events'])
+
+def test_cancel_is_private_idempotent_and_terminal(client):
+    run = client.post('/runs', json={'patient_ids': ['TEST-CLEAN']}).json()
+    url = f"/runs/{run['id']}"
+    headers = {'Authorization': f"Bearer {run['secret']}"}
+    assert client.post(url + '/cancel').status_code == 403
+    canceled = client.post(url + '/cancel', headers=headers)
+    assert canceled.status_code == 200
+    assert canceled.json()['status'] == 'canceled'
+    assert client.post(url + '/cancel', headers=headers).json()['status'] == 'canceled'
+    time.sleep(.2)
+    snapshot = client.get(url, headers=headers).json()
+    assert snapshot['status'] == 'canceled'
+    assert [e['payload']['status'] for e in snapshot['events'] if e['kind'] == 'done'] == ['canceled']
+
+
+def test_cancel_stops_active_process_and_late_retry_cannot_restart_it(client, tmp_path, monkeypatch):
+    """Only the external numerical executable is replaced with a labeled slow fixture."""
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        port = sock.getsockname()[1]
+    engine_url = f'http://127.0.0.1:{port}'
+    env = {**os.environ, 'RAW_DIR': str(tmp_path), 'ENGINE_WORKER_MODULE': 'slow_engine_fixture', 'SLOW_ENGINE_STAGE': 'masks',
+           'PYTHONPATH': str(Path(__file__).parent)}
+    process = subprocess.Popen([sys.executable, '-m', 'uvicorn', 'service.engine_api:app', '--port', str(port)],
+                               env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(100):
+            try:
+                httpx.get(engine_url + '/health', timeout=.2)
+                break
+            except httpx.ConnectError:
+                time.sleep(.05)
+        monkeypatch.setenv('ENGINE_URL', engine_url)
+        run = client.post('/runs', json={'patient_ids': ['TEST-CLEAN']}).json()
+        url = f"/runs/{run['id']}"
+        headers = {'Authorization': f"Bearer {run['secret']}"}
+        for _ in range(100):
+            if (tmp_path / 'started.json').exists():
+                break
+            time.sleep(.02)
+        started = json.loads((tmp_path / 'started.json').read_text())
+        assert client.get(url, headers=headers).json()['status'] == 'running'
+        canceled = client.post(url + '/cancel', headers=headers)
+        assert canceled.status_code == 200 and canceled.json()['status'] == 'canceled'
+        with pytest.raises(ProcessLookupError):
+            os.kill(started['pid'], 0)
+        assert not Path(started['workspace']).exists()
+        private_headers = {'Authorization': 'Bearer test-engine-secret'}
+        retry = httpx.post(engine_url + '/qc', json={'patient_ids': ['TEST-CLEAN'], 'operation_id': run['id']}, headers=private_headers)
+        assert retry.status_code == 409
+        assert client.post(url + '/cancel', headers=headers).json()['status'] == 'canceled'
+        time.sleep(3.1)
+        assert not (tmp_path / 'finished').exists()
+        snapshot = client.get(url, headers=headers).json()
+        assert snapshot['status'] == 'canceled'
+        assert len([e for e in snapshot['events'] if e['kind'] == 'done']) == 1
+        assert [e['payload']['stage'] for e in snapshot['events'] if e['kind'] == 'tool_result'] == ['qc']
+        assert len(snapshot['stage_results']['qc']) == 1
+        assert snapshot['stage_results']['masks'] == []
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
