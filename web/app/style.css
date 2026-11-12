@@ -618,3 +618,75 @@ footer span {
 .feature-values > div { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid #edf0ee; }
 .feature-values dt { overflow-wrap: anywhere; }
 .feature-values dd { margin: 0; font-variant-numeric: tabular-nums; }
+/* Browser-local history uses the same cards and orange workspace accents. */
+.history-list {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0;
+}
+.history-entry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+.history-entry strong {
+  overflow-wrap: anywhere;
+}
+.history-entry small {
+  width: 100%;
+  color: #758091;
+}
+.saved-run {
+  padding: 22px;
+}
+.saved-stage {
+  padding: 18px 0;
+  border-top: 1px solid #edf0f3;
+}
+.saved-stage h3 {
+  text-transform: capitalize;
+}
+.saved-result pre {
+  max-height: 320px;
+  overflow: auto;
+  padding: 15px;
+  background: #f6f8fa;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.saved-artifact img {
+  max-width: 100%;
+  max-height: 450px;
+  object-fit: contain;
+}
+.saved-artifact {
+  margin: 18px 0;
+}
+.saved-artifact figcaption {
+  font-size: 12px;
+  color: #6c7787;
+  margin: 8px 0;
+}
+.saved-artifact a {
+  color: #b54a1f;
+  font-size: 13px;
+}
+.persistence-status {
+  font-size: 12px;
+  color: #37755d;
+}
+.recovery-note {
+  padding: 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: #735a24;
+}
+.status.canceled {
+  color: #735a24;
+  background: #fff3d7;
+}
