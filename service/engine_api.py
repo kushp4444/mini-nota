@@ -30,6 +30,7 @@ class Selection(BaseModel):
     operation_id: str | None = None
     feature_rows: list[dict] = []
     model_version: str | None = None
+    expected_eligibility: dict | None = None
 
 
 def authorize(authorization):
@@ -104,7 +105,7 @@ async def run_stage(stage, selection, authorization):
                 await stop(process)
                 raise HTTPException(409, 'Operation canceled')
             stdout, _ = await process.communicate(json.dumps({'stage': stage,
-                'patient_ids': selection.patient_ids, 'feature_rows':selection.feature_rows, 'model_version':selection.model_version, 'raw_dir': os.environ['RAW_DIR'], 'workspace': workspace}).encode())
+                'patient_ids': selection.patient_ids, 'feature_rows':selection.feature_rows, 'model_version':selection.model_version, 'expected_eligibility':selection.expected_eligibility, 'raw_dir': os.environ['RAW_DIR'], 'workspace': workspace}).encode())
             if operation['status'] == 'canceled':
                 raise HTTPException(409, 'Operation canceled')
             if process.returncode:

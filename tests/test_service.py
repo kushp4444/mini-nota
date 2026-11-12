@@ -80,7 +80,9 @@ def client(tmp_path_factory):
             try:
                 httpx.get(f'http://127.0.0.1:{port}/health',timeout=.2);break
             except httpx.ConnectError: time.sleep(.1)
-        with TestClient(app) as c: yield c
+        with TestClient(app) as c:
+            c.fixture_outcomes = root/'outcomes.csv'
+            yield c
     finally:
         proc.terminate();proc.wait(timeout=10)
         catalog.DATABASE_URL = previous_db
@@ -105,10 +107,10 @@ def test_real_qc_retains_all_patients_and_emits_ordered_private_events(client):
     events=[json.loads(line[6:]) for line in response.text.splitlines() if line.startswith('data: ')]
     assert [e['sequence'] for e in events] == list(range(1,len(events)+1))
     assert len({e['id'] for e in events}) == len(events)
-    assert events[0]['kind']=='plan' and events[-1]['kind']=='done'
-    assert {'plan','tool_call','tool_result','decision','error','done'} <= {e['kind'] for e in events}
+    assert events[0]['kind']=='plan' and events[-1]['kind']=='gate'
+    assert {'plan','tool_call','tool_result','decision','error','gate'} <= {e['kind'] for e in events}
     run=client.get(url,headers=headers).json()
-    assert run['status']=='failed'
+    assert run['status']=='waiting_approval'
     assert [p['patient_id'] for p in run['patients']]==['TEST-CLEAN','TEST-PRIVACY','TEST-BROKEN']
     clean,private,broken=run['patients']
     assert all(clean['values'][key]['passed'] for key in ('geometry','slice_spacing','anonymized'))
@@ -273,7 +275,7 @@ def test_features_are_progressive_portable_and_retain_partial_failures(client):
     assert [e['payload']['patient']['patient_id'] for e in feature_events] == ['TEST-CONSTANT','TEST-CLEAN']
     assert any(e['kind']=='error' and e['payload'].get('stage')=='features' and e['payload']['patient_id']=='TEST-CONSTANT' for e in result['events'])
     assert result['stage_results']['score'] == []
-    assert result['events'][-1]['payload']['code'] == 'approval_required'
+    assert result['events'][-1]['kind'] == 'gate'
     assert 'NaN' not in response.text
 
 
@@ -384,14 +386,137 @@ def test_scoring_results_query_is_private_and_consistent_with_stage_results(clie
     assert results['scores'][0]['risk_score']==snapshot['stage_results']['score'][0]['values']['risk_score']
 
 
-def test_missing_outcome_preserves_features_and_stops_before_score_for_approval(client):
+def test_missing_outcome_preserves_features_and_waits_before_score_for_approval(client):
     run=client.post('/runs',json={'patient_ids':['TEST-CLEAN','TEST-MISSING']}).json()
     url=f"/runs/{run['id']}";headers={'Authorization':f"Bearer {run['secret']}"}
     client.get(url+'/events',headers=headers)
     result=client.get(url,headers=headers).json()
-    assert result['status']=='failed'
+    assert result['status']=='waiting_approval'
     assert result['stage_results']['score']==[]
     assert result['eligibility']['scoring_eligible']==['TEST-CLEAN','TEST-MISSING']
     assert result['eligibility']['evaluation_eligible']==['TEST-CLEAN']
     assert result['eligibility']['evaluation_exclusions'][0]['patient_id']=='TEST-MISSING'
     assert not any(e['kind']=='tool_call' and e['payload'].get('stage')=='score' for e in result['events'])
+
+
+def test_gate_names_every_disposition_and_approval_scores_missing_outcomes(client):
+    created=client.post('/runs',json={'patient_ids':['TEST-PRIVACY','TEST-BROKEN','TEST-NO-MASK','TEST-CONSTANT','TEST-MISSING','TEST-CLEAN']}).json()
+    url=f"/runs/{created['id']}"; headers={'Authorization':f"Bearer {created['secret']}"}
+    for _ in range(600):
+        snapshot=client.get(url,headers=headers).json()
+        if snapshot['status']!='running': break
+        time.sleep(.05)
+    assert snapshot['status']=='waiting_approval'
+    report=snapshot['eligibility']
+    assert [p['patient_id'] for p in report['dispositions']]==['TEST-PRIVACY','TEST-BROKEN','TEST-NO-MASK','TEST-CONSTANT','TEST-MISSING','TEST-CLEAN']
+    assert report['scoring_eligible']==['TEST-MISSING','TEST-CLEAN']
+    assert report['evaluation_eligible']==['TEST-CLEAN']
+    checkpoint=snapshot['checkpoint']
+    assert checkpoint['last_sequence']==snapshot['events'][-1]['sequence']
+    assert [r['patient_id'] for r in checkpoint['feature_rows']]==['TEST-MISSING','TEST-CLEAN']
+    assert all('artifacts' not in r for r in checkpoint['feature_rows'])
+    request={'disclosure_id':checkpoint['disclosure_id'],'model_version':checkpoint['model_version']}
+    assert client.post(url+'/approve',json=request).status_code==403
+    assert client.post(url+'/approve',json={**request,'disclosure_id':'stale'},headers=headers).status_code==409
+    assert client.post(url+'/approve',json=request,headers=headers).status_code==200
+    assert client.post(url+'/approve',json=request,headers=headers).status_code==200
+    client.get(url+'/events',headers=headers)
+    done=client.get(url,headers=headers).json()
+    assert done['status']=='completed'
+    assert [p['patient_id'] for p in done['stage_results']['score']]==['TEST-MISSING','TEST-CLEAN']
+    assert len([e for e in done['events'] if e['payload'].get('action')=='approve'])==1
+    assert len([e for e in done['events'] if e['kind']=='tool_call' and e['payload'].get('stage')=='score'])==1
+    assert client.post(url+'/approve',json=request,headers=headers).json()['status']=='completed'
+
+
+def test_all_patients_excluded_is_explained_terminal_failure_without_gate(client):
+    run=client.post('/runs',json={'patient_ids':['TEST-PRIVACY','TEST-NO-MASK','TEST-CONSTANT']}).json()
+    url=f"/runs/{run['id']}";headers={'Authorization':f"Bearer {run['secret']}"}
+    client.get(url+'/events',headers=headers)
+    result=client.get(url,headers=headers).json()
+    assert result['status']=='failed'
+    assert result['events'][-1]['payload']['code']=='no_scoreable_patients'
+    assert len(result['eligibility']['dispositions'])==3
+    assert result['checkpoint'] is None
+    assert not any(e['kind']=='gate' for e in result['events'])
+
+
+def test_pending_gate_does_not_block_other_visitors_and_cancel_cannot_be_reversed(client):
+    run=client.post('/runs',json={'patient_ids':['TEST-MISSING']}).json()
+    url=f"/runs/{run['id']}";headers={'Authorization':f"Bearer {run['secret']}"}
+    client.get(url+'/events',headers=headers)
+    gate=client.get(url,headers=headers).json()
+    assert gate['status']=='waiting_approval'
+    other=client.post('/runs',json={'patient_ids':['TEST-CLEAN']}).json()
+    other_headers={'Authorization':f"Bearer {other['secret']}"}
+    client.get(f"/runs/{other['id']}/events",headers=other_headers)
+    assert client.get(f"/runs/{other['id']}",headers=other_headers).json()['status']=='completed'
+    assert client.get(url,headers=headers).json()['status']=='waiting_approval'
+    assert client.post(url+'/cancel',headers=headers).json()['status']=='canceled'
+    checkpoint=gate['checkpoint']
+    request={k:checkpoint[k] for k in ('disclosure_id','model_version')}
+    assert client.post(url+'/approve',json=request,headers=headers).json()['status']=='canceled'
+    snapshot=client.get(url,headers=headers).json()
+    assert snapshot['stage_results']['score']==[]
+    assert len([e for e in snapshot['events'] if e['kind']=='done'])==1
+
+
+def test_approval_reveals_new_outcome_exclusions_before_any_score(client):
+    run=client.post('/runs',json={'patient_ids':['TEST-MISSING','TEST-CLEAN']}).json()
+    url=f"/runs/{run['id']}";headers={'Authorization':f"Bearer {run['secret']}"}
+    client.get(url+'/events',headers=headers)
+    initial=client.get(url,headers=headers).json()['checkpoint']
+    # Mutate only the external fixture outcome source, never runner internals.
+    path=client.fixture_outcomes
+    original=path.read_bytes()
+    try:
+        outcomes=pd.read_csv(path)
+        outcomes[outcomes.patient_id!='TEST-CLEAN'].to_csv(path,index=False)
+        request={k:initial[k] for k in ('disclosure_id','model_version')}
+        response=client.post(url+'/approve',json=request,headers=headers)
+        assert response.status_code==409
+        changed=client.get(url,headers=headers).json()
+        assert changed['status']=='waiting_approval'
+        assert changed['eligibility']['evaluation_eligible']==[]
+        assert changed['checkpoint']['disclosure_id']!=initial['disclosure_id']
+        assert changed['stage_results']['score']==[]
+        assert client.post(url+'/approve',json=request,headers=headers).status_code==409
+        updated={k:changed['checkpoint'][k] for k in ('disclosure_id','model_version')}
+        assert client.post(url+'/approve',json=updated,headers=headers).status_code==200
+        client.get(url+'/events',headers=headers)
+        assert client.get(url,headers=headers).json()['status']=='completed'
+    finally:
+        path.write_bytes(original)
+
+
+def test_pending_approval_is_not_expired_by_temporary_terminal_retention(client):
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
+    proc=subprocess.Popen([sys.executable,'-m','uvicorn','service.app:app','--port',str(port)],
+        env={**os.environ,'RUN_RETENTION_SECONDS':'.1','RUN_CLEANUP_INTERVAL':'.05'},stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    try:
+        with httpx.Client(base_url=f'http://127.0.0.1:{port}',timeout=10) as api:
+            for _ in range(100):
+                try:
+                    api.get('/runs/launch-context');break
+                except httpx.ConnectError:time.sleep(.05)
+            run=api.post('/runs',json={'patient_ids':['TEST-MISSING']}).json()
+            headers={'Authorization':f"Bearer {run['secret']}"};url=f"/runs/{run['id']}"
+            for _ in range(400):
+                snapshot=api.get(url,headers=headers).json()
+                if snapshot['status']!='running':break
+                time.sleep(.05)
+            assert snapshot['status']=='waiting_approval'
+            time.sleep(.4)
+            saved=api.get(url,headers=headers)
+            assert saved.status_code==200 and saved.json()['status']=='waiting_approval'
+            checkpoint=saved.json()['checkpoint']
+            request={k:checkpoint[k] for k in ('disclosure_id','model_version')}
+            assert api.post(url+'/approve',headers=headers,json=request).status_code==200
+            for _ in range(200):
+                page=api.get(url,headers=headers)
+                if page.status_code==200 and page.json()['status']=='completed':break
+                time.sleep(.02)
+            assert page.json()['status']=='completed'
+    finally:
+        proc.terminate();proc.wait(timeout=10)

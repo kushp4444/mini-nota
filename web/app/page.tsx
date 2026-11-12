@@ -1,4 +1,5 @@
 "use client";
+import ApprovalGate from "../components/ApprovalGate";
 import ScoreResults from "../components/ScoreResults";
 import MaskResults, { type MaskPatientResult } from "../components/MaskResults";
 import FeatureResults, { type FeaturePatientResult } from "../components/FeatureResults";
@@ -189,6 +190,13 @@ export default function Home() {
     }
   }
 
+  async function approveCurrent() {
+    const run = activeRun.current;
+    if (!run || run.status !== "waiting_approval") return;
+    const checkpoint = run.checkpoint as {disclosure_id:string;model_version:string};
+    const response = await fetch(`/api/runs/${run.id}/approve`, {method:"POST",headers:{Authorization:`Bearer ${run.secret}`,"Content-Type":"application/json"},body:JSON.stringify({disclosure_id:checkpoint.disclosure_id,model_version:checkpoint.model_version})});
+    if (!response.ok) throw Error(response.status === 409 ? "The disclosed cohort changed. Review the updated patient report before approving." : "Approval was not confirmed. Retry when the service is available.");
+  }
   async function cancelCurrent() {
     const run = activeRun.current;
     if (!run || terminal(run.status)) return;
@@ -505,6 +513,7 @@ export default function Home() {
                 </div>
                 <MaskResults selectedIds={selection} results={masks} qcResults={results} />
                 <FeatureResults selectedIds={selection} results={features} qcResults={results} maskResults={masks} />
+                {activeRun.current && <ApprovalGate run={activeRun.current} onApprove={approveCurrent} />}
                 <ScoreResults selectedIds={selection} events={events} />
               </>
             )}

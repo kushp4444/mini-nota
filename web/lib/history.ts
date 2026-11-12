@@ -199,7 +199,7 @@ export async function captureEvent(
     artifacts: [...run.artifacts, ...artifacts],
     updatedAt: new Date().toISOString(),
     lastSequence: Math.max(run.lastSequence, event.sequence),
-    status: isDone ? event.payload.status || "completed" : run.status,
+    status: isDone ? event.payload.status || "completed" : event.payload.status || run.status,
     reason: isDone
       ? event.payload.reason ||
         (event.payload.status === "failed"

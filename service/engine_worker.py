@@ -14,7 +14,7 @@ def main():
         from src.frozen_model import ModelError
         try:
             result = run_model_tool(request['stage'],request['feature_rows'],request['model_version'],
-                                    os.environ['MODEL_BUNDLE'],os.environ['OUTCOMES_CSV'])
+                                    os.environ['MODEL_BUNDLE'],os.environ['OUTCOMES_CSV'],expected_eligibility=request.get('expected_eligibility'))
         except ModelError as exc:
             result = {'status':'failed','patients':[],'errors':[{'code':'incompatible_model_input','message':str(exc)}]}
         json.dump(result,sys.stdout,allow_nan=False)
