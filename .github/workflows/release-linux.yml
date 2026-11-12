@@ -33,6 +33,15 @@ jobs:
           --env TMPDIR=/run/mini-nota
           --env DATABASE_URL=postgresql://mini_nota:ci-fixture-only@127.0.0.1:5432/mini_nota
           --entrypoint python mini-nota:ci -m pytest tests -q -p no:cacheprovider
+      - name: Explicit S3 HTTP fixture suite in an isolated test environment
+        run: |
+          docker run --rm --network host --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --env REQUIRE_STORAGE_FIXTURE=1 --entrypoint sh mini-nota:ci -ec '
+              python -m venv --system-site-packages /tmp/storage-fixture
+              /tmp/storage-fixture/bin/python -m pip install -r /app/deploy/requirements-storage-fixture.txt
+              /tmp/storage-fixture/bin/python -m pytest tests/test_object_storage.py -q -p no:cacheprovider
+            '
       - name: Report reproducibility contract
         run: |
           docker image inspect mini-nota:ci --format '{{.Id}} {{.Architecture}} {{.Os}}'

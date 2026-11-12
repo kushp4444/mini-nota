@@ -1,0 +1,5 @@
+# Isolated test-only venv. Never install Moto into the production dispatcher/runtime.
+# Moto server constrains pydantic<=2.12.4; the app runtime keeps its own frozen version.
+moto[server]==5.1.20
+boto3==1.42.30
+pytest==9.2.0
