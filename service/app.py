@@ -27,7 +27,7 @@ async def lifespan(app):
         while True:
             await asyncio.sleep(60)
             for key, run in list(runs.items()):
-                if run['status'] != 'running' and time.monotonic() - run['touched'] > RETENTION_SECONDS:
+                if run['status'] in ('completed', 'failed', 'canceled') and time.monotonic() - run['touched'] > RETENTION_SECONDS:
                     del runs[key]
     task = asyncio.create_task(cleanup())
     yield
@@ -38,17 +38,19 @@ class Selection(BaseModel):
     patient_ids: list[str]
 
 def emit(run, kind, message, payload=None):
+    if run['status'] == 'canceled' and kind != 'done':
+        return
     seq = len(run['events']) + 1
     run['events'].append({'id': f"{run['id']}:{seq}", 'run_id': run['id'],
         'sequence': seq, 'timestamp': datetime.now(timezone.utc).isoformat(),
         'kind': kind, 'message': message, 'payload': payload or {}})
     run['touched'] = time.monotonic()
 
-async def invoke_stage(stage, patient_id):
+async def invoke_stage(stage, patient_id, run_id=None):
     async with httpx.AsyncClient(timeout=300) as client:
         response = await client.post(os.environ.get('ENGINE_URL', 'http://127.0.0.1:8001') + '/' + stage,
             headers={'Authorization': f"Bearer {os.environ.get('ENGINE_SECRET', '')}"},
-            json={'patient_ids': [patient_id]})
+            json={'patient_ids': [patient_id], 'operation_id': run_id})
         response.raise_for_status()
         result = response.json()
     return result['patients'][0]
@@ -58,7 +60,9 @@ async def execute(run):
     try:
         for patient_id in run['patient_ids']:
             emit(run, 'tool_call', f'QC · {patient_id}', {'stage': 'qc', 'patient_id': patient_id})
-            patient = await invoke_stage('qc', patient_id)
+            patient = await invoke_stage('qc', patient_id, run['id'])
+            if run['status'] != 'running':
+                return
             run['patients'].append(patient)
             run['stage_results']['qc'].append(patient)
             emit(run, 'tool_result', f"{patient_id}: QC {patient['status']}", {'stage': 'qc', 'patient': patient})
@@ -70,7 +74,9 @@ async def execute(run):
                 continue
             patient_id = checked['patient_id']
             emit(run, 'tool_call', f'Mask construction · {patient_id}', {'stage': 'masks', 'patient_id': patient_id})
-            patient = await invoke_stage('masks', patient_id)
+            patient = await invoke_stage('masks', patient_id, run['id'])
+            if run['status'] != 'running':
+                return
             run['stage_results']['masks'].append(patient)
             if patient['status'] == 'success':
                 values = patient['values']
@@ -81,12 +87,15 @@ async def execute(run):
             if patient['errors']:
                 reasons = '; '.join(error['message'] for error in patient['errors'])
                 emit(run, 'error', f'{patient_id}: {reasons}; patient excluded.', {'stage': 'masks', 'patient_id': patient_id, 'errors': patient['errors']})
+
         for masked in run['stage_results']['masks']:
             if masked['status'] != 'success':
                 continue
             patient_id = masked['patient_id']
             emit(run, 'tool_call', f'Feature extraction · {patient_id}', {'stage': 'features', 'patient_id': patient_id})
-            patient = await invoke_stage('features', patient_id)
+            patient = await invoke_stage('features', patient_id, run['id'])
+            if run['status'] != 'running':
+                return
             run['stage_results']['features'].append(patient)
             count = len(patient.get('feature_schema', []))
             message = f'{patient_id}: {count} radiomic features ready.' if patient['status'] == 'success' else f'{patient_id}: feature extraction failed.'
@@ -94,11 +103,16 @@ async def execute(run):
             if patient['errors']:
                 reasons = '; '.join(error['message'] for error in patient['errors'])
                 emit(run, 'error', f'{patient_id}: {reasons}; patient excluded from scoring.', {'stage': 'features', 'patient_id': patient_id, 'errors': patient['errors']})
+        if run['status'] != 'running':
+            return
+
         run['status'] = 'completed'
         succeeded = sum(p['status'] == 'success' for p in run['stage_results']['masks'])
         featured = sum(p['status'] == 'success' for p in run['stage_results']['features'])
         emit(run, 'done', f'QC, masks and feature extraction complete: {succeeded} masks and {featured} feature rows available. Frozen-model scoring is not yet connected.', {'status': 'completed', 'selected': len(run['patient_ids']), 'passed': sum(p['status'] == 'success' for p in run['patients']), 'masks_succeeded': succeeded, 'features_succeeded': featured})
     except Exception:
+        if run['status'] != 'running':
+            return
         run['status'] = 'failed'
         emit(run, 'error', 'Imaging service unavailable; available patient results retained.', {'code': 'engine_unavailable'})
         emit(run, 'done', 'Run failed.', {'status': 'failed'})
@@ -139,7 +153,35 @@ async def events(run_id: str, after: int = Query(default=0, ge=0), authorization
                 cursor = event['sequence']
             # A producer can finish while an earlier yielded event is in flight.
             # Drain its final batch (including done) before closing the stream.
-            if run['status'] != 'running' and cursor >= len(run['events']):
+            if run['status'] in ('completed', 'failed', 'canceled') and cursor >= len(run['events']):
                 break
             await asyncio.sleep(0.05)
     return StreamingResponse(stream(), media_type='text/event-stream', headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'})
+
+@app.post('/runs/{run_id}/cancel')
+async def cancel_run(run_id: str, authorization: str = Header(default='')):
+    run = authorized(run_id, authorization)
+    async with run.setdefault('control_lock', asyncio.Lock()):
+        if run['status'] in ('completed', 'failed', 'canceled'):
+            return {'id': run_id, 'status': run['status']}
+        # Freeze the run before awaiting the private engine: late responses cannot
+        # append results or advance it while the process termination is in flight.
+        run['status'] = 'canceling'
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.post(os.environ.get('ENGINE_URL', 'http://127.0.0.1:8001') + f'/operations/{run_id}/cancel',
+                    headers={'Authorization': f"Bearer {os.environ.get('ENGINE_SECRET', '')}"})
+                response.raise_for_status()
+        except Exception:
+            # Do not claim that computation stopped if the worker did not confirm.
+            raise HTTPException(503, 'Cancellation not confirmed by imaging worker; retry cancellation')
+        task = run.get('task')
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        run['status'] = 'canceled'
+        emit(run, 'done', 'Run canceled by visitor; available results retained.', {'status': 'canceled', 'reason': 'Canceled by visitor'})
+        return {'id': run_id, 'status': 'canceled'}
