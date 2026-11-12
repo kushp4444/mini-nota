@@ -36,3 +36,17 @@ TDD red receipts included absent evaluation module, missing percentile in public
 The real-data release browser check runs QC → masks → features → scoring for LUNG1-002 (risk score 0.31620669544422614, percentile 96.08433734939759, higher model risk), checks GraphQL percentile/group and exploratory evaluation, sees the fixed 0.606 / n=82 baseline before/after selection, verifies a one-patient curve and unavailable c-index, then reloads History and verifies the saved curve. Representative actual overlay and curve screenshot: `/private/tmp/mini-nota-implementation/ticket8-evaluation.png` (visually inspected); isolated harness: `verify-ticket8-live.py` in that directory, ports 3080/8080/8081, PostgreSQL schema `ticket8_verify`.
 
 Verification results and final integration commit are reported by the implementing agent. No hosted deployment or clinical-validity claim is made by this ticket.
+
+## Final merged verification
+
+Merged integration tip `50c5f70` (#9 approval/checkpoint delivery) into this branch as `20d5431`. The merge keeps #9's private-API/worker propagation and re-disclosure behavior, both gate/evaluation CSS, and one scoring regression for the identical disclosure-race behavior. `run_model_tool(..., expected_eligibility=...)` reads outcomes once, compares the freshly joined scoring/evaluation identities and named evaluation exclusions to the disclosed report **before computing scores**, then computes exploratory evaluation from that same outcome snapshot. A changed outcome cohort raises `ModelError('Eligibility changed after disclosure')`; #9 re-prepares/discloses instead of silently scoring it. This replaces the temporary recursive second-outcome-read guard and closes the join race.
+
+On the merged branch:
+
+- `python -m pytest -q`: **52 passed**, 43 existing dependency deprecation warnings, 86.31 seconds. This includes numerical imaging/model/evaluation boundaries and real application API orchestration with isolated PostgreSQL schemas.
+- `npm run build --prefix web`: production Next build and TypeScript **passed**.
+- `PYTHONPATH=. <shared-python> /private/tmp/mini-nota-implementation/verify-ticket8-live.py tests/evaluation.spec.ts tests/scoring.spec.ts tests/approval.spec.ts tests/history.spec.ts tests/cancellation.spec.ts tests/reconnect.spec.ts tests/catalog.spec.ts`: **27 passed**, 40.5 seconds. The real one-patient run and authorized GraphQL checks passed; History retained both the frozen full baseline and selected curve after reload with all API requests explicitly blocked.
+- Recomputed versioned evaluation against checksummed prepared inputs: identical version and all values; no overwrite or model mutation. All 82 score/percentile/group values exactly match their individual, batch and reversed-order computations (39 higher, 43 lower), 0.038 seconds.
+- Original model file checksum remains **`c6ce07c581c99569644f294eed611c7018b131df6938ed1e62719fc05a8cb89b`**. Final `git diff --check` passes, current integration is an ancestor, and no raw/generated visitor data or dependency environments were committed.
+
+The actual full-cohort KM plot was also rendered and visually inspected: `/private/tmp/mini-nota-implementation/ticket8-held-out-curves.png`. Lower group n=43/events=39; higher n=39/events=34. The natural late curve crossing is retained. This plot is a release inspection artifact; the product displays selected-cohort observed curves.
