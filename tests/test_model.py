@@ -1,4 +1,6 @@
 """Frozen model public numerical boundary; explicitly synthetic survival data."""
+import csv
+import io
 import json
 import numpy as np
 import pandas as pd
@@ -31,10 +33,30 @@ def test_training_freezes_development_pipeline_and_roundtrips_independent_scores
     assert len(bundle['reference_scores']) == 60
     assert 'constant' not in bundle['pipeline']['features']
     # Held-out measurements/outcomes cannot change any fitted parameter or CV decision.
-    features = pd.read_csv(tmp_path/'features.csv'); features.loc[60:, 'signal'] = np.nan
-    features.to_csv(tmp_path/'features.csv',index=False)
-    outcomes = pd.read_csv(tmp_path/'outcomes.csv'); outcomes.loc[60:, 'duration'] = -999
-    outcomes.to_csv(tmp_path/'outcomes.csv',index=False)
+    development_inputs = {name: (tmp_path/name).read_bytes().splitlines(keepends=True)[:61]
+                          for name in ("features.csv", "outcomes.csv")}
+    development_frames = {name: pd.read_csv(tmp_path/name).iloc[:60]
+                          for name in development_inputs}
+    # Re-serializing the whole frame would round-trip development floats too.
+    # Preserve every untouched CSV line verbatim and edit only held-out cells.
+    held_out = set(ids[60:])
+    for name, column, value in [('features.csv', 'signal', ''), ('outcomes.csv', 'duration', '-999')]:
+        path = tmp_path/name
+        lines = path.read_bytes().splitlines(keepends=True)
+        column_index = next(csv.reader([lines[0].decode()])).index(column)
+        for index, line in enumerate(lines[1:], 1):
+            row = next(csv.reader([line.decode()]))
+            if row[0] in held_out:
+                row[column_index] = value
+                encoded = io.StringIO(newline='')
+                csv.writer(encoded, lineterminator='\n').writerow(row)
+                lines[index] = encoded.getvalue().encode()
+        path.write_bytes(b''.join(lines))
+    assert pd.read_csv(tmp_path/'features.csv').loc[60:, 'signal'].isna().all()
+    assert pd.read_csv(tmp_path/'outcomes.csv').loc[60:, 'duration'].eq(-999).all()
+    for name, original in development_inputs.items():
+        assert (tmp_path/name).read_bytes().splitlines(keepends=True)[:61] == original, f'{name}: development input bytes changed'
+        pd.testing.assert_frame_equal(pd.read_csv(tmp_path/name).iloc[:60], development_frames[name], check_exact=True)
     changed = train_model(tmp_path, tmp_path/'second.json',folds=3)
     assert changed['pipeline'] == bundle['pipeline']
     assert changed['training'] == bundle['training']

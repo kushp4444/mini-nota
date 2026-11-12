@@ -9,7 +9,7 @@ RUN python -m pip wheel --wheel-dir /wheels -r requirements-runtime.txt
 # The resolved wheel files + hashes are the offline installation contract.
 RUN cd /wheels && sha256sum *.whl > SHA256SUMS
 
-FROM ${PYTHON_BASE}
+FROM ${PYTHON_BASE} AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/* \
     && useradd --uid 10001 --create-home app
 COPY --from=wheels /wheels /wheels
@@ -29,3 +29,14 @@ ENV ASSET_MANIFEST=/assets/manifest.json PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFE
 USER 10001:10001
 EXPOSE 8000
 ENTRYPOINT ["python", "-m", "service.backend"]
+
+# CI-only executable dependencies for public process/JavaScript interoperability
+# tests. Keep them out of the default release image and future compute runtime.
+FROM runtime AS ci
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs procps && rm -rf /var/lib/apt/lists/* \
+    && node --version && ps --version
+USER 10001:10001
+
+# A default build continues to produce the lean Python/native runtime.
+FROM runtime AS release
