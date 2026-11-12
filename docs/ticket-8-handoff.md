@@ -50,3 +50,9 @@ On the merged branch:
 - Original model file checksum remains **`c6ce07c581c99569644f294eed611c7018b131df6938ed1e62719fc05a8cb89b`**. Final `git diff --check` passes, current integration is an ancestor, and no raw/generated visitor data or dependency environments were committed.
 
 The actual full-cohort KM plot was also rendered and visually inspected: `/private/tmp/mini-nota-implementation/ticket8-held-out-curves.png`. Lower group n=43/events=39; higher n=39/events=34. The natural late curve crossing is retained. This plot is a release inspection artifact; the product displays selected-cohort observed curves.
+
+## Integration verification and actual catalog import
+
+Integrated `78377f2` into `codex/mini-nota-mvp` at merge `8f20379`. Imported this immutable asset into the actual local PostgreSQL public catalog using `scripts.import_evaluation`; returned `held-out-v1-59301a6ba6104aea1954`. Verified public catalog still contains exactly the original 82 held-out patients and zero fixtures; original `model_metadata.evaluation.status` remains `not_evaluated`, with completed evaluation loaded separately from `model_evaluation`.
+
+Focused integration checks passed: 7 numerical/scoring tests; production Next.js build and TypeScript; one real LUNG1-002 browser/API workflow against the public catalog on isolated ports 3180/8180/8181, including fixed full baseline, selected one-patient curve/unavailable concordance, authorized percentile result, and offline History reload. Visually inspected its actual overlay, score, baseline and curve screenshot. Recomputed the full checksummed evaluation into a temporary asset: identical committed asset, c-index 0.6057961981925833, 82 evaluated, 95% interval [0.5326564103414366, 0.6739709514124799], all 2,000 bootstrap samples estimable. Frozen model SHA-256 remains `c6ce07c581c99569644f294eed611c7018b131df6938ed1e62719fc05a8cb89b`. No integration fixes were necessary; no tracker closure or push performed.
