@@ -31,11 +31,19 @@ async function proxy(
       const chunks: Uint8Array[] = [];
       let size = 0;
       if (request.body) {
-        for await (const chunk of request.body) {
-          size += chunk.byteLength;
-          if (size > 4_000_000) return Response.json({detail:"Request exceeds the recovery limit; keep local History and start a new run"}, {status:413});
-          chunks.push(chunk);
-        }
+        const reader = request.body.getReader();
+        try {
+          while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            size += value.byteLength;
+            if (size > 4_000_000) {
+              await reader.cancel();
+              return Response.json({detail:"Request exceeds the recovery limit; keep local History and start a new run"}, {status:413});
+            }
+            chunks.push(value);
+          }
+        } finally { reader.releaseLock(); }
       }
       body = Buffer.concat(chunks).toString("utf8");
     }

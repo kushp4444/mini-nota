@@ -24,7 +24,12 @@ export async function reconnectRun(initial: SavedRun, receive: (run: SavedRun) =
           return;
         }
         const recovery = await fetch('/api/runs/restore', {method:'POST',headers:{Authorization:`Bearer ${run.secret}`,'Content-Type':'application/json'},body,cache:'no-store',signal:AbortSignal.any([signal,AbortSignal.timeout(15000)])});
-        if ([403,409,413,422].includes(recovery.status)) {
+        if (recovery.status === 409) {
+          // Another tab has recovered/advanced it. Replay its current disclosure.
+          restored = true;
+          continue;
+        }
+        if ([403,413,422].includes(recovery.status)) {
           const detail = await recovery.json().catch(() => ({}));
           await receive(interrupted(run, typeof detail.detail === 'string' ? detail.detail : 'Saved approval is incompatible or cannot be verified.'));
           return;
@@ -55,6 +60,7 @@ export async function reconnectRun(initial: SavedRun, receive: (run: SavedRun) =
       if (page.next_sequence !== run.lastSequence || page.last_sequence < run.lastSequence) throw Error('Event replay cursor mismatch; completion has not been accepted');
       if (terminal(page.status) && page.last_sequence === run.lastSequence && !terminal(run.status)) throw Error('Terminal run has no final event; completion has not been accepted');
       failures = 0;
+      restored = false; // A later independent worker loss can recover this still-pending gate again.
       if (!terminal(run.status) && page.last_sequence === run.lastSequence) await new Promise(resolve => setTimeout(resolve, 750));
     } catch (e) {
       if (signal.aborted) return;

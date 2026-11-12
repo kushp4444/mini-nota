@@ -314,10 +314,10 @@ export default function Home() {
             )}
             {view !== "History" &&
               saved &&
-              terminal(status) &&
+              (terminal(status) || status === "waiting_approval") &&
               !storageError && (
                 <p role="status" className="persistence-status">
-                  Saved in this browser
+                  {status === "waiting_approval" ? "Approval gate saved in this browser" : "Saved in this browser"}
                 </p>
               )}
             {view !== "History" &&

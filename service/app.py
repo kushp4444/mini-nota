@@ -26,10 +26,14 @@ WORKER_CONTEXT = secrets.token_urlsafe(24)
 CHECKPOINT_LIMIT = 4_000_000
 
 def checkpoint_bytes(value):
-    # JSON.stringify turns 1.0/-0.0 into 1/0. Canonicalize those identically.
+    # IEEE-754 identity survives JSON.stringify's decimal formatting (1.0, -0,
+    # exponent notation, and large integral feature values). Counts stay small.
     def normalize(item):
-        if isinstance(item, float) and math.isfinite(item) and item.is_integer():
-            return int(item)
+        if type(item) in (int,float):
+            number = float(item)
+            if not math.isfinite(number):
+                raise ValueError('Nonfinite checkpoint number')
+            return 0.0 if number == 0 else number
         if isinstance(item, list):
             return [normalize(v) for v in item]
         if isinstance(item, dict):
@@ -413,7 +417,8 @@ async def restore_run(request: Request, authorization: str = Header(default=''))
 @app.get('/runs/{run_id}')
 def get_run(run_id: str, authorization: str = Header(default='')):
     run = authorized(run_id, authorization)
-    return {key: run[key] for key in ('id', 'status', 'patient_ids', 'patients', 'stage_results', 'events', 'model', 'eligibility', 'checkpoint', 'evaluation')}
+    return {**{key: run[key] for key in ('id', 'status', 'patient_ids', 'patients', 'stage_results', 'events', 'model', 'eligibility', 'checkpoint', 'evaluation')},
+            'sequence_base':run.get('sequence_base',0),'last_sequence':last_sequence(run)}
 
 @app.get('/runs/{run_id}/events')
 async def events(run_id: str, after: int = Query(default=0, ge=0), authorization: str = Header(default='')):
