@@ -183,6 +183,38 @@ def test_cancel_stops_active_process_and_late_retry_cannot_restart_it(client, tm
         process.terminate()
         process.wait(timeout=10)
 
+def test_reconnect_pages_drain_completed_run_without_snapshot_or_gaps(client):
+    run = client.post('/runs', json={'patient_ids':['TEST-CLEAN']}).json()
+    url = f"/runs/{run['id']}"
+    headers = {'Authorization': f"Bearer {run['secret']}"}
+    # No browser event subscription: runner must finish independently.
+    for _ in range(200):
+        response = client.get(url + '/event-page?after=0&limit=2', headers=headers)
+        assert response.status_code == 200
+        if response.json()['status'] != 'running': break
+        time.sleep(.05)
+    cursor, received = 0, []
+    while True:
+        page = client.get(url + f'/event-page?after={cursor}&limit=2', headers=headers).json()
+        assert len(page['events']) <= 2
+        received.extend(page['events'])
+        cursor = page['next_sequence']
+        if cursor == page['last_sequence']: break
+    assert received[-1]['kind'] == 'done'
+    assert [e['sequence'] for e in received] == list(range(1,cursor+1))
+    replay = client.get(url + '/event-page?after=0&limit=2', headers=headers).json()
+    assert replay['events'] == received[:2]
+    mask = next(e for e in received if e['payload'].get('stage') == 'masks' and e['kind']=='tool_result')
+    artifact = mask['payload']['patient']['artifacts'][0]
+    assert 'data_base64' not in artifact
+    image = client.get(artifact['url'].removeprefix('/api'), headers=headers)
+    assert image.status_code == 200 and image.content.startswith(b'\x89PNG')
+    assert client.get(artifact['url'].removeprefix('/api')).status_code == 403
+    assert client.get(url + '/event-page',headers={'Authorization':'Bearer stale'}).status_code == 403
+    assert client.get(url + f'/event-page?after={cursor+1}',headers=headers).status_code == 409
+    assert client.get('/runs/absent/event-page',headers=headers).status_code == 404
+
+
 def test_features_are_progressive_portable_and_retain_partial_failures(client):
     import base64
     import csv
@@ -219,3 +251,47 @@ def test_cancellation_after_completion_keeps_original_terminal_result(client):
     assert before['status'] == 'completed'
     assert client.post(url + '/cancel', headers=headers).json()['status'] == 'completed'
     assert client.get(url, headers=headers).json() == before
+
+
+def test_launch_nonce_recovers_same_run_after_lost_response_and_rejects_reuse(client):
+    import secrets
+    context = client.get('/runs/launch-context').json()
+    request = {'patient_ids':['TEST-CLEAN'], 'launch_nonce': secrets.token_urlsafe(32), 'worker_context': context['worker_context']}
+    first = client.post('/runs',json=request)
+    assert first.status_code == 201
+    replay = client.post('/runs',json=request)
+    assert replay.status_code == 201 and replay.json()['id'] == first.json()['id']
+    assert replay.json()['secret'] == first.json()['secret']
+    assert client.post('/runs',json={**request,'patient_ids':['TEST-NO-MASK']}).status_code == 409
+    lost_worker = client.post('/runs',json={**request,'worker_context':'previous-worker'})
+    assert lost_worker.status_code == 409
+    assert lost_worker.json()['detail']['code'] == 'launch_interrupted'
+
+
+def test_expired_launch_nonce_never_silently_restarts_computation(client):
+    import secrets
+    # Separate runner with short temporary retention; test only public HTTP APIs.
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1',0)); port = sock.getsockname()[1]
+    proc = subprocess.Popen([sys.executable,'-m','uvicorn','service.app:app','--port',str(port)],
+        env={**os.environ,'RUN_RETENTION_SECONDS':'.1','RUN_CLEANUP_INTERVAL':'.05'},
+        stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    try:
+        with httpx.Client(base_url=f'http://127.0.0.1:{port}', timeout=10) as api:
+            for _ in range(100):
+                try:
+                    context = api.get('/runs/launch-context').json(); break
+                except httpx.ConnectError: time.sleep(.05)
+            request = {'patient_ids':['TEST-CLEAN'],'launch_nonce':secrets.token_urlsafe(32),'worker_context':context['worker_context']}
+            created = api.post('/runs',json=request).json()
+            headers = {'Authorization':f"Bearer {created['secret']}"}
+            for _ in range(400):
+                page = api.get(f"/runs/{created['id']}/event-page",headers=headers)
+                if page.status_code == 404: break
+                time.sleep(.05)
+            assert page.status_code == 404
+            retry = api.post('/runs',json=request)
+            assert retry.status_code == 409
+            assert retry.json()['detail']['code'] == 'launch_interrupted'
+    finally:
+        proc.terminate();proc.wait(timeout=10)

@@ -23,6 +23,7 @@ export type SavedRun = {
   version: 1;
   id: string;
   secret: string;
+  launchNonce?: string;
   patientIds: string[];
   createdAt: string;
   updatedAt: string;
@@ -61,7 +62,16 @@ export async function saveRun(run: SavedRun): Promise<void> {
   try {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction("runs", "readwrite");
-      tx.objectStore("runs").put(run);
+      const records = tx.objectStore("runs");
+      const existing = records.get(run.id);
+      existing.onsuccess = () => {
+        const saved = existing.result as SavedRun | undefined;
+        // Another tab may already have saved a longer prefix or final outcome.
+        if (saved && (saved.lastSequence > run.lastSequence ||
+            (saved.lastSequence === run.lastSequence && terminal(saved.status) && !terminal(run.status)))) return;
+        try { records.put(run); }
+        catch (error) { tx.abort(); reject(error); }
+      };
       tx.oncomplete = () => resolve();
       tx.onabort = () => reject(tx.error || new Error("Storage write aborted"));
       tx.onerror = () => reject(tx.error);
@@ -154,6 +164,7 @@ export async function captureEvent(
           throw Error("Artifact URL must use the application proxy");
         const response = await fetch(target, {
           headers: { Authorization: `Bearer ${run.secret}` },
+          signal: AbortSignal.timeout(15000),
         });
         if (!response.ok)
           throw Error(`Artifact unavailable (${response.status})`);

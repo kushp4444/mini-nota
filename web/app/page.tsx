@@ -3,12 +3,13 @@ import MaskResults, { type MaskPatientResult } from "../components/MaskResults";
 import FeatureResults, { type FeaturePatientResult } from "../components/FeatureResults";
 import { useEffect, useRef, useState } from "react";
 import History from "../components/History";
+import { recoverLaunch, StoppedLaunch } from "../lib/launch";
+import { reconnectRun } from "../lib/reconnect";
 import CancelRun from "../components/CancelRun";
-import { browserRun, watchBrowserRun, reserveBrowserRun, attachBrowserRun, releaseBrowserRun } from "../lib/browser-run";
+import { browserRun, watchBrowserRun, reserveBrowserRun, attachBrowserRun, releaseBrowserRun, pendingLaunch, reclaimBrowserRun, type PendingLaunch } from "../lib/browser-run";
 import {
   Audit,
   SavedRun,
-  captureEvent,
   createSavedRun,
   readRuns,
   saveRun,
@@ -37,7 +38,9 @@ export default function Home() {
     [storageError, setStorageError] = useState(""),
     [saved, setSaved] = useState(false),
     [unfinished, setUnfinished] = useState<SavedRun>(),
-    [browserBusy, setBrowserBusy] = useState(false);
+    [browserBusy, setBrowserBusy] = useState(false),
+    [launchPending, setLaunchPending] = useState<PendingLaunch>();
+  const connection = useRef<AbortController | undefined>(undefined);
   const activeRun = useRef<SavedRun | undefined>(undefined);
   useEffect(() => watchBrowserRun(() => {
     try { setBrowserBusy(Boolean(browserRun())); }
@@ -47,17 +50,29 @@ export default function Home() {
     readRuns()
       .then((runs) => {
         setHistory(runs.filter((run) => terminal(run.status)));
-        setUnfinished(runs.find((run) => !terminal(run.status)));
+        const pending = runs.find((run) => !terminal(run.status));
+        if (pending) {
+          setUnfinished(pending);
+          setSelection(pending.patientIds);
+          setView("Analysis");
+          void follow(pending);
+        } else {
+          const launch = pendingLaunch();
+          if (launch) void launchAndFollow(launch);
+        }
       })
       .catch((e) => setStorageError(storageMessage(e)));
+    return () => connection.current?.abort();
   }, []);
   async function persist(run: SavedRun) {
     if (activeRun.current?.id === run.id && terminal(activeRun.current.status) && !terminal(run.status)) return;
     activeRun.current = run;
-    if (terminal(run.status)) releaseBrowserRun(run.id);
+    if (terminal(run.status)) { releaseBrowserRun(run.id); if (run.launchNonce) releaseBrowserRun(run.launchNonce); }
     setSaved(false);
     try {
       await saveRun(run);
+      if (run.launchNonce) attachBrowserRun(run.launchNonce, run.id);
+      if (terminal(run.status)) releaseBrowserRun(run.id);
       setSaved(true);
       setStorageError("");
       if (terminal(run.status))
@@ -78,13 +93,54 @@ export default function Home() {
       .then((r) => {
         if (r.errors) throw Error("Catalog unavailable");
         setCatalog(r.data.patients);
-        setSelection(r.data.patients.map((p: Patient) => p.id));
+        if (!activeRun.current) setSelection(r.data.patients.map((p: Patient) => p.id));
       })
       .catch(() =>
         setError("The patient catalog is unavailable. Please try again later."),
       );
   }, []);
+  async function displayRun(run: SavedRun) {
+    setEvents(run.events);
+    setStatus(run.status);
+    setFeatures(run.events.filter(e => e.kind === "tool_result" && e.payload.stage === "features" && e.payload.patient).map(e => e.payload.patient));
+    setResults(run.events.filter(e => e.kind === "tool_result" && e.payload.stage === "qc").map(e => e.payload.patient));
+    const patients = structuredClone(run.events.filter(e => e.kind === "tool_result" && e.payload.stage === "masks").map(e => e.payload.patient));
+    for (const patient of patients) {
+      for (const artifact of patient.artifacts || []) {
+        const savedArtifact = run.artifacts.find(a => a.patientId === patient.patient_id && a.role === artifact.role && a.blob);
+        if (savedArtifact?.blob) artifact.data_base64 = await new Promise<string>(resolve => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result).split(",")[1]);
+          reader.readAsDataURL(savedArtifact.blob!);
+        });
+      }
+    }
+    setMasks(patients);
+  }
+  async function follow(run: SavedRun) {
+    connection.current?.abort();
+    const controller = new AbortController();
+    connection.current = controller;
+    activeRun.current = run;
+    await reclaimBrowserRun(run.id);
+    await displayRun(run);
+    try {
+      await reconnectRun(run, async next => {
+        await persist(next);
+        if (controller.signal.aborted) return;
+        await displayRun(next);
+        setUnfinished(terminal(next.status) ? undefined : next);
+        if (next.reason && next.status === "failed") setError(next.reason);
+      }, controller.signal);
+    } catch (e) {
+      if (controller.signal.aborted) return;
+      setError((e instanceof Error ? e.message : "Connection unavailable") + ". Server work has not been canceled. Retry reconnection to collect available results.");
+      setUnfinished(activeRun.current);
+      setStatus("disconnected");
+    }
+  }
   async function start() {
+    if (activeRun.current && !terminal(activeRun.current.status)) return;
     if (
       !selection.length ||
       selection.some((id) => !catalog.some((p) => p.id === id))
@@ -93,7 +149,7 @@ export default function Home() {
       return;
     }
     let reservation: string;
-    try { reservation = await reserveBrowserRun(); }
+    try { reservation = await reserveBrowserRun(selection); }
     catch (e) { setError(e instanceof Error ? e.message : 'Unable to coordinate runs in this browser.'); return; }
     setError("");
     setSaved(false);
@@ -104,77 +160,40 @@ export default function Home() {
     setFeatures([]);
     setStatus("running");
     setView("Analysis");
+    await launchAndFollow({nonce:reservation,patientIds:selection});
+  }
+  async function launchAndFollow(launch: PendingLaunch) {
+    setLaunchPending(launch);
+    setView("Analysis");
+    setSelection(launch.patientIds);
+    setStatus("connecting");
+    setError("");
     try {
-      const created = await fetch("/api/runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ patient_ids: selection }),
-      });
-      const run = await created.json();
-      if (!created.ok) { releaseBrowserRun(reservation); throw Error(run.detail || "Unable to start run"); }
-      attachBrowserRun(reservation, run.id);
-      await persist(createSavedRun(run, selection));
-      const response = await fetch(`/api/runs/${run.id}/events`, {
-        headers: { Authorization: `Bearer ${run.secret}` },
-      });
-      if (!response.ok || !response.body)
-        throw Error("Unable to connect to run");
-      const reader = response.body.getReader(),
-        decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let split;
-        while ((split = buffer.indexOf("\n\n")) >= 0) {
-          const block = buffer.slice(0, split);
-          buffer = buffer.slice(split + 2);
-          const line = block.split("\n").find((l) => l.startsWith("data: "));
-          if (!line) continue;
-          const event: Audit = JSON.parse(line.slice(6));
-          setEvents((prev) =>
-            prev.some((e) => e.id === event.id) ? prev : [...prev, event],
-          );
-          if (activeRun.current)
-            await persist(await captureEvent(activeRun.current, event));
-          if (event.kind === "tool_result" && event.payload.patient) {
-            if (event.payload.stage === "qc")
-              setResults((prev) => [...prev, event.payload.patient as Result]);
-            if (event.payload.stage === "masks")
-              setMasks((prev) => [...prev, event.payload.patient as MaskPatientResult]);
-          }
-          if (event.kind === "tool_result" && event.payload.stage === "features" && event.payload.patient)
-            setFeatures((prev) => [...prev, event.payload.patient as FeaturePatientResult]);
-          if (event.kind === "done")
-            setStatus(event.payload.status || "completed");
-        }
-      }
+      const run = await recoverLaunch(pendingLaunch() || launch);
+      const savedRun = {...createSavedRun({...run, status:"running"}, launch.patientIds), launchNonce:launch.nonce};
+      await persist(savedRun);
+      setLaunchPending(undefined);
+      await follow(savedRun);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Run unavailable");
-      // A broken connection is not proof that server computation failed.
-      const current = activeRun.current as SavedRun | undefined;
-      setStatus(
-        current && !terminal(current.status) ? "interrupted" : "failed",
-      );
+      if (e instanceof StoppedLaunch) {
+        releaseBrowserRun(launch.nonce);
+        setLaunchPending(undefined);
+        const failed = {...createSavedRun({id:`launch-${launch.nonce}`,secret:"",status:"failed"},launch.patientIds), reason:e.message};
+        await persist(failed);
+        setStatus("failed");
+      } else setStatus("disconnected");
+      setError(e instanceof Error ? e.message : "Launch recovery unavailable");
     }
   }
+
   async function cancelCurrent() {
     const run = activeRun.current;
     if (!run || terminal(run.status)) return;
     const headers = { Authorization: `Bearer ${run.secret}` };
     const response = await fetch(`/api/runs/${run.id}/cancel`, { method: 'POST', headers });
     if (!response.ok) throw Error('Cancellation was not confirmed. Please retry; processing may still be active.');
-    const snapshot = await fetch(`/api/runs/${run.id}`, { headers });
-    if (!snapshot.ok) throw Error('Work stopped, but its final results could not be collected. Retry to retain the final record.');
-    const result = await snapshot.json();
-    for (const event of result.events || []) {
-      if (activeRun.current?.id !== run.id) return;
-      await persist(await captureEvent(activeRun.current, event));
-    }
-    setEvents(activeRun.current?.events || []);
-    setStatus(activeRun.current?.status || result.status);
-    setUnfinished(undefined);
+    connection.current?.abort();
+    await follow(activeRun.current || run);
   }
   return (
     <div className="shell">
@@ -271,12 +290,15 @@ export default function Home() {
                 {storageError}
               </div>
             )}
+            {view !== "History" && launchPending && <div role="status" className="card recovery-note">
+              Recovering a pending launch. The saved request identifies the same run; server work has not been canceled.
+              {status === "disconnected" && <button onClick={() => launchAndFollow(pendingLaunch() || launchPending)}>Retry launch recovery</button>}
+            </div>}
             {view !== "History" && unfinished && (
               <div role="status" className="card recovery-note">
-                An unfinished run ({unfinished.id}) was saved locally with{" "}
-                {unfinished.events.length} audit events. Reconnection is not
-                available in this slice. Closing this page did not cancel server
-                work; results never received here may be lost.
+                Reconnecting saved run ({unfinished.id}) from event {unfinished.lastSequence}.
+                Closing this page does not cancel server work.
+                {status === "disconnected" && <button onClick={() => follow(unfinished)}>Retry reconnection</button>}
               </div>
             )}
             {view !== "History" &&
@@ -370,7 +392,7 @@ export default function Home() {
                   <span>{catalog.length} available patients</span>
                   <button
                     className="primary"
-                    disabled={!selection.length || browserBusy || status === "running"}
+                    disabled={!selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}
                     onClick={start}
                   >
                     Run analysis <span>→</span>
@@ -417,7 +439,7 @@ export default function Home() {
                       <button
                         className="primary"
                         onClick={start}
-                        disabled={!selection.length || browserBusy || status === "running"}
+                        disabled={!selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}
                       >
                         Run analysis →
                       </button>
