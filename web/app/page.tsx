@@ -1,4 +1,5 @@
 "use client";
+import { loadExample, type Example } from "../lib/examples";
 import ApprovalGate from "../components/ApprovalGate";
 import ScoreResults from "../components/ScoreResults";
 import MaskResults, { type MaskPatientResult } from "../components/MaskResults";
@@ -43,6 +44,13 @@ export default function Home() {
     [browserBusy, setBrowserBusy] = useState(false),
     [recoveringHistory, setRecoveringHistory] = useState(true),
     [launchPending, setLaunchPending] = useState<PendingLaunch>();
+  const [example, setExample] = useState<Example>();
+  const [exampleError, setExampleError] = useState("");
+  async function openExample(kind: "success" | "failure") {
+    setView("Examples"); setExampleError("");
+    try { setExample(await loadExample(kind)); }
+    catch (e) { setExampleError(e instanceof Error ? e.message : "Example unavailable"); }
+  }
   const connection = useRef<AbortController | undefined>(undefined);
   const activeRun = useRef<SavedRun | undefined>(undefined);
   useEffect(() => watchBrowserRun(() => {
@@ -86,7 +94,7 @@ export default function Home() {
     }
   }
   const displayedEvents =
-    view === "History" ? savedSelection?.events || [] : events;
+    view === "Examples" ? example?.events || [] : view === "History" ? savedSelection?.events || [] : events;
   useEffect(() => {
     fetch("/api/graphql", {
       method: "POST",
@@ -223,6 +231,7 @@ export default function Home() {
           ["Patients", "▦"],
           ["Analysis", "▥"],
           ["History", "◷"],
+          ["Examples", "◇"],
         ].map(([name, icon]) => (
           <button
             key={name}
@@ -261,7 +270,7 @@ export default function Home() {
                     ? "Patient library"
                     : view === "Analysis"
                       ? "Cohort analysis"
-                      : "Run history"}
+                      : view === "Examples" ? "Curated examples" : "Run history"}
                 </h1>
                 <p>
                   {view === "Patients"
@@ -271,7 +280,12 @@ export default function Home() {
               </div>
               <span className="tag">{catalog.some((p) => p.fixture) ? "DEVELOPMENT FIXTURE" : "FROZEN HELD-OUT LIBRARY"}</span>
             </div>
-            <div className="card overview">
+            <div className="card example-launch">
+              <div><h2>Explore an actual execution</h2><p>Immediate, read-only product examples. Visitor runs appear separately in browser-local History.</p></div>
+              <button className="primary" onClick={() => openExample("success")}>View completed example</button>
+              <button className="example-secondary" onClick={() => openExample("failure")}>View failure example</button>
+            </div>
+            {view !== "Examples" && <div className="card overview">
               <div>
                 <small>Collection</small>
                 <strong>NSCLC Radiomics / Lung1</strong>
@@ -289,9 +303,10 @@ export default function Home() {
                 <strong>QC → masks → features → scoring</strong>
               </div>
             </div>
+            }
             {browserBusy && !activeRun.current && <p role="status">A run is already active or awaiting approval in this browser. Return to its tab to finish or cancel it.</p>}
             {activeRun.current && !terminal(activeRun.current.status) && <CancelRun onConfirm={cancelCurrent} />}
-            {error && (
+            {error && view !== "Examples" && (
               <div role="alert" className="error">
                 {error}
               </div>
@@ -329,7 +344,20 @@ export default function Home() {
                   available results and named missing-artifact reasons.
                 </p>
               )}
-            {view === "History" ? (
+            {view === "Examples" ? (
+              <>
+                {exampleError && <p role="alert">{exampleError}</p>}
+                {example ? <>
+                  <div className="card" role="note"><h2>{example.example.description}</h2>
+                    <p>Static curated example · read-only · never launches or resumes a visitor run.</p>
+                    <p>{example.patientIds.length} selected public Lung1 held-out patients. This selection is separate from the full {example.events.find(e => e.kind === "plan")?.payload.model?.held_out_count}-patient held-out evaluation.</p>
+                    {example.example.faults.length > 0 && <><strong>Deliberately introduced fixture faults; the live library is unchanged.</strong><ul>{example.example.faults.map(fault => <li key={fault}>{fault}</li>)}</ul></>}
+                    <p>Model: {example.example.provenance.model_version}</p>
+                  </div>
+                  <History runs={[]} selected={example} onSelect={() => {}} example />
+                </> : <p>Select a completed or failure example above.</p>}
+              </>
+            ) : view === "History" ? (
               <History
                 runs={history}
                 selected={savedSelection}
