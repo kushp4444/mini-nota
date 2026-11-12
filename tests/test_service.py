@@ -117,3 +117,35 @@ def test_masks_follow_qc_and_keep_portable_overlay_bytes_and_named_failures(clie
     calls = [e['payload'] for e in result['events'] if e['kind'] == 'tool_call' and e['payload'].get('stage') == 'masks']
     assert [e['patient_id'] for e in calls] == ['TEST-NO-MASK','TEST-CLEAN']
     assert any(e['kind']=='error' and e['payload'].get('stage')=='masks' and e['payload']['patient_id']=='TEST-NO-MASK' for e in result['events'])
+
+
+def test_reconnect_pages_drain_completed_run_without_snapshot_or_gaps(client):
+    run = client.post('/runs', json={'patient_ids':['TEST-CLEAN']}).json()
+    url = f"/runs/{run['id']}"
+    headers = {'Authorization': f"Bearer {run['secret']}"}
+    # No browser event subscription: runner must finish independently.
+    for _ in range(200):
+        response = client.get(url + '/event-page?after=0&limit=2', headers=headers)
+        assert response.status_code == 200
+        if response.json()['status'] != 'running': break
+        time.sleep(.05)
+    cursor, received = 0, []
+    while True:
+        page = client.get(url + f'/event-page?after={cursor}&limit=2', headers=headers).json()
+        assert len(page['events']) <= 2
+        received.extend(page['events'])
+        cursor = page['next_sequence']
+        if cursor == page['last_sequence']: break
+    assert received[-1]['kind'] == 'done'
+    assert [e['sequence'] for e in received] == list(range(1,cursor+1))
+    replay = client.get(url + '/event-page?after=0&limit=2', headers=headers).json()
+    assert replay['events'] == received[:2]
+    mask = next(e for e in received if e['payload'].get('stage') == 'masks' and e['kind']=='tool_result')
+    artifact = mask['payload']['patient']['artifacts'][0]
+    assert 'data_base64' not in artifact
+    image = client.get(artifact['url'].removeprefix('/api'), headers=headers)
+    assert image.status_code == 200 and image.content.startswith(b'\x89PNG')
+    assert client.get(artifact['url'].removeprefix('/api')).status_code == 403
+    assert client.get(url + '/event-page',headers={'Authorization':'Bearer stale'}).status_code == 403
+    assert client.get(url + f'/event-page?after={cursor+1}',headers=headers).status_code == 409
+    assert client.get('/runs/absent/event-page',headers=headers).status_code == 404

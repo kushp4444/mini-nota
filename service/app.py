@@ -129,3 +129,48 @@ async def events(run_id: str, after: int = Query(default=0, ge=0), authorization
                 break
             await asyncio.sleep(0.05)
     return StreamingResponse(stream(), media_type='text/event-stream', headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'})
+
+# Bounded, reconnectable delivery for function-hosted application proxies. Artifact
+# bytes are fetched separately, so replay never aggregates a cohort's images.
+@app.get('/runs/{run_id}/event-page')
+def event_page(run_id: str, after: int = Query(default=0, ge=0),
+               limit: int = Query(default=20, ge=1, le=50), authorization: str = Header(default='')):
+    run = authorized(run_id, authorization)
+    if after > len(run['events']):
+        raise HTTPException(409, 'Event cursor is ahead of temporary runner state')
+    page = []
+    size = 0
+    for event in run['events'][after:after + limit]:
+        item = json.loads(json.dumps(event))
+        payload = item['payload']
+        artifacts = [*payload.get('artifacts', []), *payload.get('patient', {}).get('artifacts', [])]
+        for index, artifact in enumerate(artifacts):
+            if artifact.pop('data_base64', None) is not None:
+                artifact['url'] = f"/api/runs/{run_id}/artifacts/{event['sequence']}/{index}"
+        encoded_size = len(json.dumps(item).encode())
+        if size + encoded_size > 512_000:
+            if not page:
+                raise HTTPException(413, 'A structured event exceeds the delivery limit')
+            break
+        page.append(item)
+        size += encoded_size
+    return {'id': run_id, 'status': run['status'], 'events': page,
+            'next_sequence': page[-1]['sequence'] if page else after,
+            'last_sequence': len(run['events'])}
+
+@app.get('/runs/{run_id}/artifacts/{sequence}/{index}')
+def artifact_bytes(run_id: str, sequence: int, index: int, authorization: str = Header(default='')):
+    import base64
+    from fastapi.responses import Response
+    run = authorized(run_id, authorization)
+    try:
+        if sequence < 1 or index < 0:
+            raise IndexError
+        payload = run['events'][sequence - 1]['payload']
+        artifacts = [*payload.get('artifacts', []), *payload.get('patient', {}).get('artifacts', [])]
+        artifact = artifacts[index]
+        data = base64.b64decode(artifact['data_base64'], validate=True)
+    except (IndexError, KeyError, ValueError):
+        raise HTTPException(404, 'Generated artifact bytes are no longer available')
+    return Response(data, media_type=artifact.get('media_type', 'application/octet-stream'),
+                    headers={'Cache-Control': 'no-store'})

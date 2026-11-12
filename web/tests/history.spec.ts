@@ -1,9 +1,18 @@
-import { test, expect, Page } from "@playwright/test";
+import { test, expect, Page, Route } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+// Translate the existing synthetic event fixtures into bounded replay responses.
+function fulfill(route: Route, options: Parameters<Route["fulfill"]>[0]) {
+  if (options?.contentType === "text/event-stream") {
+    const events = String(options.body).split("\n\n").filter(Boolean).map(block => JSON.parse(block.split("\n").find(line => line.startsWith("data: "))!.slice(6)));
+    const after = Number(new URL(route.request().url()).searchParams.get("after"));
+    return route.fulfill({json: {id: events[0].run_id, status: events.at(-1).payload.status, events: events.filter(e => e.sequence > after), next_sequence: events.at(-1).sequence, last_sequence: events.at(-1).sequence}});
+  }
+  return route.fulfill(options);
+}
 // Explicit synthetic API fixture: tests local history, not measured imaging results.
 async function fixture(page: Page, status = "completed") {
   await page.route("**/api/graphql", (route) =>
-    route.fulfill({
+    fulfill(route, {
       json: {
         data: {
           patients: [
@@ -19,7 +28,7 @@ async function fixture(page: Page, status = "completed") {
   );
   let count = 0;
   await page.route("**/api/runs", (route) =>
-    route.fulfill({
+    fulfill(route, {
       status: 201,
       json: {
         id: `fixture-${++count}`,
@@ -28,7 +37,7 @@ async function fixture(page: Page, status = "completed") {
       },
     }),
   );
-  await page.route("**/api/runs/*/events", (route) => {
+  await page.route("**/api/runs/*/event-page?*", (route) => {
     const id = route.request().url().split("/").at(-2)!;
     const events = [
       {
@@ -77,7 +86,7 @@ async function fixture(page: Page, status = "completed") {
       sequence: i + 1,
       timestamp: "2026-11-11T12:00:00Z",
     }));
-    return route.fulfill({
+    return fulfill(route, {
       contentType: "text/event-stream",
       body: events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join(""),
     });
@@ -218,8 +227,8 @@ test("temporary artifact bytes remain local after the application artifact disap
 }) => {
   await fixture(page);
   const source = "/api/runs/fixture-1/artifacts/overlay";
-  await page.route("**/api/runs/*/events", (route) =>
-    route.fulfill({
+  await page.route("**/api/runs/*/event-page?*", (route) =>
+    fulfill(route, {
       contentType: "text/event-stream",
       body: [
         {
@@ -257,7 +266,7 @@ test("temporary artifact bytes remain local after the application artifact disap
     }),
   );
   await page.route(`**${source}`, (route) =>
-    route.fulfill({
+    fulfill(route, {
       contentType: "image/svg+xml",
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"><rect width="12" height="12" fill="blue"/></svg>',
     }),
@@ -268,7 +277,7 @@ test("temporary artifact bytes remain local after the application artifact disap
     page.getByText("Saved in this browser", { exact: true }),
   ).toBeVisible();
   await page.route(`**${source}`, (route) =>
-    route.fulfill({ status: 410, body: "Temporary file removed" }),
+    fulfill(route, { status: 410, body: "Temporary file removed" }),
   );
   await page.reload();
   await page.getByRole("button", { name: "History", exact: true }).click();
@@ -282,8 +291,8 @@ test("missing artifacts retain actual numerical results and a named warning", as
   page,
 }) => {
   await fixture(page);
-  await page.route("**/api/runs/*/events", (route) =>
-    route.fulfill({
+  await page.route("**/api/runs/*/event-page?*", (route) =>
+    fulfill(route, {
       contentType: "text/event-stream",
       body: [
         {
@@ -340,7 +349,7 @@ test("missing artifacts retain actual numerical results and a named warning", as
 
 test("feature and survival stage values and data artifacts remain inspectable after reload", async ({ page }) => {
   await fixture(page);
-  await page.route("**/api/runs/*/events", route => route.fulfill({
+  await page.route("**/api/runs/*/event-page?*", route => fulfill(route, {
     contentType: "text/event-stream",
     body: [
       { kind: "tool_result", message: "Synthetic feature result", payload: {

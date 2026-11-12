@@ -154,6 +154,7 @@ export async function captureEvent(
           throw Error("Artifact URL must use the application proxy");
         const response = await fetch(target, {
           headers: { Authorization: `Bearer ${run.secret}` },
+          signal: AbortSignal.timeout(15000),
         });
         if (!response.ok)
           throw Error(`Artifact unavailable (${response.status})`);

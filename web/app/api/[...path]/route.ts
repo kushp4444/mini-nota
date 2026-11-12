@@ -10,7 +10,8 @@ async function proxy(
     path[0] === "runs" &&
     (path.length === 1 ||
       path.length === 2 ||
-      (path.length === 3 && path[2] === "events"))
+      (path.length === 3 && ["events", "event-page"].includes(path[2])) ||
+      (path.length === 5 && path[2] === "artifacts"))
   ))
     return new Response("Not found", { status: 404 });
   const base = process.env.RUNNER_URL;

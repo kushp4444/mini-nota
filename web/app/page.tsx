@@ -2,10 +2,10 @@
 import MaskResults, { type MaskPatientResult } from "../components/MaskResults";
 import { useEffect, useRef, useState } from "react";
 import History from "../components/History";
+import { reconnectRun } from "../lib/reconnect";
 import {
   Audit,
   SavedRun,
-  captureEvent,
   createSavedRun,
   readRuns,
   saveRun,
@@ -33,14 +33,22 @@ export default function Home() {
     [storageError, setStorageError] = useState(""),
     [saved, setSaved] = useState(false),
     [unfinished, setUnfinished] = useState<SavedRun>();
+  const connection = useRef<AbortController | undefined>(undefined);
   const activeRun = useRef<SavedRun | undefined>(undefined);
   useEffect(() => {
     readRuns()
       .then((runs) => {
         setHistory(runs.filter((run) => terminal(run.status)));
-        setUnfinished(runs.find((run) => !terminal(run.status)));
+        const pending = runs.find((run) => !terminal(run.status));
+        if (pending) {
+          setUnfinished(pending);
+          setSelection(pending.patientIds);
+          setView("Analysis");
+          void follow(pending);
+        }
       })
       .catch((e) => setStorageError(storageMessage(e)));
+    return () => connection.current?.abort();
   }, []);
   async function persist(run: SavedRun) {
     activeRun.current = run;
@@ -67,13 +75,52 @@ export default function Home() {
       .then((r) => {
         if (r.errors) throw Error("Catalog unavailable");
         setCatalog(r.data.patients);
-        setSelection(r.data.patients.map((p: Patient) => p.id));
+        if (!activeRun.current) setSelection(r.data.patients.map((p: Patient) => p.id));
       })
       .catch(() =>
         setError("The patient catalog is unavailable. Please try again later."),
       );
   }, []);
+  async function displayRun(run: SavedRun) {
+    setEvents(run.events);
+    setStatus(run.status);
+    setResults(run.events.filter(e => e.kind === "tool_result" && e.payload.stage === "qc").map(e => e.payload.patient));
+    const patients = structuredClone(run.events.filter(e => e.kind === "tool_result" && e.payload.stage === "masks").map(e => e.payload.patient));
+    for (const patient of patients) {
+      for (const artifact of patient.artifacts || []) {
+        const savedArtifact = run.artifacts.find(a => a.patientId === patient.patient_id && a.role === artifact.role && a.blob);
+        if (savedArtifact?.blob) artifact.data_base64 = await new Promise<string>(resolve => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result).split(",")[1]);
+          reader.readAsDataURL(savedArtifact.blob!);
+        });
+      }
+    }
+    setMasks(patients);
+  }
+  async function follow(run: SavedRun) {
+    connection.current?.abort();
+    const controller = new AbortController();
+    connection.current = controller;
+    activeRun.current = run;
+    await displayRun(run);
+    try {
+      await reconnectRun(run, async next => {
+        await persist(next);
+        if (controller.signal.aborted) return;
+        await displayRun(next);
+        setUnfinished(terminal(next.status) ? undefined : next);
+        if (next.reason && next.status === "failed") setError(next.reason);
+      }, controller.signal);
+    } catch (e) {
+      if (controller.signal.aborted) return;
+      setError((e instanceof Error ? e.message : "Connection unavailable") + ". Server work has not been canceled. Retry reconnection to collect available results.");
+      setUnfinished(activeRun.current);
+      setStatus("disconnected");
+    }
+  }
   async function start() {
+    if (activeRun.current && !terminal(activeRun.current.status)) return;
     if (
       !selection.length ||
       selection.some((id) => !catalog.some((p) => p.id === id))
@@ -98,40 +145,7 @@ export default function Home() {
       const run = await created.json();
       if (!created.ok) throw Error(run.detail || "Unable to start run");
       await persist(createSavedRun(run, selection));
-      const response = await fetch(`/api/runs/${run.id}/events`, {
-        headers: { Authorization: `Bearer ${run.secret}` },
-      });
-      if (!response.ok || !response.body)
-        throw Error("Unable to connect to run");
-      const reader = response.body.getReader(),
-        decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let split;
-        while ((split = buffer.indexOf("\n\n")) >= 0) {
-          const block = buffer.slice(0, split);
-          buffer = buffer.slice(split + 2);
-          const line = block.split("\n").find((l) => l.startsWith("data: "));
-          if (!line) continue;
-          const event: Audit = JSON.parse(line.slice(6));
-          setEvents((prev) =>
-            prev.some((e) => e.id === event.id) ? prev : [...prev, event],
-          );
-          if (activeRun.current)
-            await persist(await captureEvent(activeRun.current, event));
-          if (event.kind === "tool_result" && event.payload.patient) {
-            if (event.payload.stage === "qc")
-              setResults((prev) => [...prev, event.payload.patient as Result]);
-            if (event.payload.stage === "masks")
-              setMasks((prev) => [...prev, event.payload.patient as MaskPatientResult]);
-          }
-          if (event.kind === "done")
-            setStatus(event.payload.status || "completed");
-        }
-      }
+      await follow(activeRun.current!);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Run unavailable");
       // A broken connection is not proof that server computation failed.
@@ -236,10 +250,9 @@ export default function Home() {
             )}
             {view !== "History" && unfinished && (
               <div role="status" className="card recovery-note">
-                An unfinished run ({unfinished.id}) was saved locally with{" "}
-                {unfinished.events.length} audit events. Reconnection is not
-                available in this slice. Closing this page did not cancel server
-                work; results never received here may be lost.
+                Reconnecting saved run ({unfinished.id}) from event {unfinished.lastSequence}.
+                Closing this page does not cancel server work.
+                {status === "disconnected" && <button onClick={() => follow(unfinished)}>Retry reconnection</button>}
               </div>
             )}
             {view !== "History" &&
@@ -331,7 +344,7 @@ export default function Home() {
                   <span>{catalog.length} available patients</span>
                   <button
                     className="primary"
-                    disabled={!selection.length || status === "running"}
+                    disabled={!selection.length || Boolean(activeRun.current && !terminal(activeRun.current.status))}
                     onClick={start}
                   >
                     Run analysis <span>→</span>
@@ -378,7 +391,7 @@ export default function Home() {
                       <button
                         className="primary"
                         onClick={start}
-                        disabled={!selection.length || status === "running"}
+                        disabled={!selection.length || Boolean(activeRun.current && !terminal(activeRun.current.status))}
                       >
                         Run analysis →
                       </button>
