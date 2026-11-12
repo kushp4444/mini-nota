@@ -23,6 +23,7 @@ COPY scripts ./scripts
 COPY tests ./tests
 COPY docs ./docs
 COPY pyradiomics_config.yaml ./
+COPY deploy/requirements-storage-fixture.txt ./deploy/requirements-storage-fixture.txt
 ENV ASSET_MANIFEST=/assets/manifest.json PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TMPDIR=/run/mini-nota \
     OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS=1
 USER 10001:10001
