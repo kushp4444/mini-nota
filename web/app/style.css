@@ -694,3 +694,8 @@ footer span {
 .cancel-dialog { max-width:480px; margin:24px; padding:28px; }
 .cancel-dialog p { margin:16px 0; line-height:1.5; }
 .cancel-dialog button { margin-right:12px; }
+
+.score-results .model-context { padding: 0 24px; overflow-wrap: anywhere; font-size: 13px; color: #6c7787; }
+.score-table { overflow-x: auto; }
+.score-table table { min-width: 600px; }
+.score-table td:first-child { white-space: nowrap; }

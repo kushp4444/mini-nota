@@ -17,7 +17,7 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from .catalog import patients
+from .catalog import patients, model_metadata
 
 runs = {}
 launches = {}
@@ -60,8 +60,18 @@ async def invoke_stage(stage, patient_id, run_id=None):
         result = response.json()
     return result['patients'][0]
 
+async def invoke_model_tool(stage, run, rows):
+    async with httpx.AsyncClient(timeout=300) as client:
+        response = await client.post(os.environ.get('ENGINE_URL', 'http://127.0.0.1:8001') + '/' + stage,
+            headers={'Authorization': f"Bearer {os.environ.get('ENGINE_SECRET', '')}"},
+            json={'patient_ids':[r['patient_id'] for r in rows], 'operation_id':run['id'],
+                  'feature_rows':rows, 'model_version':run['model']['model_version']})
+        response.raise_for_status()
+        return response.json()
+
+
 async def execute(run):
-    emit(run, 'plan', f"Check {len(run['patient_ids'])} selected patients with real DICOM QC, construct verified tumor masks, then extract radiomic features for passing patients.")
+    emit(run, 'plan', f"Check {len(run['patient_ids'])} selected patients with real DICOM QC, construct verified tumor masks, then extract radiomic features and score eligible held-out patients with the frozen model.")
     try:
         for patient_id in run['patient_ids']:
             emit(run, 'tool_call', f'QC · {patient_id}', {'stage': 'qc', 'patient_id': patient_id})
@@ -111,15 +121,47 @@ async def execute(run):
         if run['status'] != 'running':
             return
 
+        rows = [p for p in run['stage_results']['features'] if p['status'] == 'success']
+        failed = []
+        for stage in ('qc','masks','features'):
+            failed.extend({'patient_id':p['patient_id'],'stage':stage,'errors':p['errors']}
+                          for p in run['stage_results'][stage] if p['status'] != 'success')
+        report = {'scoring_eligible':[p['patient_id'] for p in rows], 'evaluation_eligible':[],
+                  'evaluation_exclusions':[], 'processing_exclusions':failed}
+        if rows:
+            if not run['model']:
+                raise RuntimeError('Frozen model metadata is not configured')
+            emit(run,'tool_call','Prepare scoring and outcome eligibility.',{'stage':'eligibility'})
+            prepared = await invoke_model_tool('eligibility',run,rows)
+            if run['status'] != 'running': return
+            report.update(prepared)
+            report['processing_exclusions'] = failed
+        run['eligibility'] = report
+        emit(run,'decision',f"{len(rows)} scoring-eligible patients; {len(report['evaluation_eligible'])} evaluation-eligible patients.",
+             {'stage':'eligibility','report':report})
+        if failed or report['evaluation_exclusions'] or not rows:
+            run['status'] = 'failed'
+            reason = ('No patients remain eligible for scoring.' if not rows else
+                      'Scoring stopped before execution: exclusions require approval, which is not connected yet.')
+            emit(run,'done',reason,{'status':'failed','reason':reason,'code':'approval_required' if rows else 'no_scoreable_patients','eligibility':report})
+            return
+        emit(run,'tool_call',f"Frozen model scoring · {len(rows)} patients",{'stage':'score','model_version':run['model']['model_version']})
+        scored = await invoke_model_tool('score',run,rows)
+        if run['status'] != 'running': return
+        for patient in scored['patients']:
+            run['stage_results']['score'].append(patient)
+            emit(run,'tool_result',f"{patient['patient_id']}: frozen-model risk score ready.",{'stage':'score','patient':patient})
         run['status'] = 'completed'
-        succeeded = sum(p['status'] == 'success' for p in run['stage_results']['masks'])
-        featured = sum(p['status'] == 'success' for p in run['stage_results']['features'])
-        emit(run, 'done', f'QC, masks and feature extraction complete: {succeeded} masks and {featured} feature rows available. Frozen-model scoring is not yet connected.', {'status': 'completed', 'selected': len(run['patient_ids']), 'passed': sum(p['status'] == 'success' for p in run['patients']), 'masks_succeeded': succeeded, 'features_succeeded': featured})
-    except Exception:
+        emit(run,'done',f"All four tools complete: {len(scored['patients'])} selected held-out patients scored with {run['model']['model_version']}.",
+             {'status':'completed','selected':len(run['patient_ids']),'scored':len(scored['patients']),'model_version':run['model']['model_version']})
+    except Exception as exc:
         if run['status'] != 'running':
             return
         run['status'] = 'failed'
-        emit(run, 'error', 'Imaging service unavailable; available patient results retained.', {'code': 'engine_unavailable'})
+        if isinstance(exc,httpx.HTTPStatusError) and exc.response.status_code == 422:
+            emit(run,'error','Frozen-model input rejected; scoring stopped and available results retained.',{'code':'incompatible_model_input','errors':exc.response.json().get('detail',[])})
+        else:
+            emit(run, 'error', 'Imaging or model service unavailable; available patient results retained.', {'code': 'engine_unavailable'})
         emit(run, 'done', 'Run failed.', {'status': 'failed'})
 
 @app.get('/runs/launch-context')
@@ -164,7 +206,7 @@ async def create_run(selection: Selection):
     if nonce and nonce in launches:
         return await create_run(selection)
     run = {'id': run_id, 'secret': secrets.token_urlsafe(32), 'status': 'running',
-           'patient_ids': ids, 'patients': [], 'stage_results': {'qc': [], 'masks': [], 'features': []}, 'events': [], 'touched': time.monotonic()}
+           'patient_ids': ids, 'patients': [], 'model':await asyncio.to_thread(model_metadata), 'eligibility':None, 'stage_results': {'qc': [], 'masks': [], 'features': [], 'score': []}, 'events': [], 'touched': time.monotonic()}
     runs[run['id']] = run
     if nonce:
         launches[nonce] = {'id': run['id'], 'patient_ids': list(ids)}
@@ -182,7 +224,7 @@ def authorized(run_id, authorization):
 @app.get('/runs/{run_id}')
 def get_run(run_id: str, authorization: str = Header(default='')):
     run = authorized(run_id, authorization)
-    return {key: run[key] for key in ('id', 'status', 'patient_ids', 'patients', 'stage_results', 'events')}
+    return {key: run[key] for key in ('id', 'status', 'patient_ids', 'patients', 'stage_results', 'events', 'model', 'eligibility')}
 
 @app.get('/runs/{run_id}/events')
 async def events(run_id: str, after: int = Query(default=0, ge=0), authorization: str = Header(default='')):
@@ -272,3 +314,13 @@ async def cancel_run(run_id: str, authorization: str = Header(default='')):
         run['status'] = 'canceled'
         emit(run, 'done', 'Run canceled by visitor; available results retained.', {'status': 'canceled', 'reason': 'Canceled by visitor'})
         return {'id': run_id, 'status': 'canceled'}
+
+
+@app.get('/runs/{run_id}/results')
+def run_results(run_id: str, authorization: str = Header(default='')):
+    """Small query surface for GraphQL; control/replay stays on run endpoints."""
+    run = authorized(run_id,authorization)
+    return {'id':run_id,'status':run['status'],'patient_ids':run['patient_ids'],
+            'model_version':run['model']['model_version'] if run['model'] else None,
+            'scores':[{'patient_id':p['patient_id'],**p['values']} for p in run['stage_results']['score']],
+            'eligibility':run['eligibility']}

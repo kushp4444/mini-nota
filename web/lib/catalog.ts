@@ -6,3 +6,8 @@ export async function patients() {
   );
   return rows;
 }
+
+export async function modelMetadata() {
+  const { rows } = await pool.query("SELECT metadata FROM model_metadata WHERE singleton");
+  return rows[0]?.metadata ?? null;
+}

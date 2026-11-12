@@ -28,6 +28,8 @@ CANCEL_RETENTION_SECONDS = 3600
 class Selection(BaseModel):
     patient_ids: list[str]
     operation_id: str | None = None
+    feature_rows: list[dict] = []
+    model_version: str | None = None
 
 
 def authorize(authorization):
@@ -93,20 +95,24 @@ async def run_stage(stage, selection, authorization):
     operations[operation_id] = operation
     try:
         with tempfile.TemporaryDirectory(prefix='mini-nota-tool-') as workspace:
+            native_env = {**os.environ, **{name:os.environ.get(name,'1') for name in ('OPENBLAS_NUM_THREADS','OMP_NUM_THREADS','VECLIB_MAXIMUM_THREADS','ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS')}}
             process = await asyncio.create_subprocess_exec(sys.executable, '-m', os.environ.get('ENGINE_WORKER_MODULE', 'service.engine_worker'),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
+                stderr=asyncio.subprocess.DEVNULL, start_new_session=True, env=native_env)
             operation['process'] = process
             if operation['status'] == 'canceled':
                 await stop(process)
                 raise HTTPException(409, 'Operation canceled')
             stdout, _ = await process.communicate(json.dumps({'stage': stage,
-                'patient_ids': selection.patient_ids, 'raw_dir': os.environ['RAW_DIR'], 'workspace': workspace}).encode())
+                'patient_ids': selection.patient_ids, 'feature_rows':selection.feature_rows, 'model_version':selection.model_version, 'raw_dir': os.environ['RAW_DIR'], 'workspace': workspace}).encode())
             if operation['status'] == 'canceled':
                 raise HTTPException(409, 'Operation canceled')
             if process.returncode:
                 raise HTTPException(502, 'Imaging subprocess failed')
-            return json.loads(stdout)
+            result = json.loads(stdout)
+            if stage in ('eligibility','score') and result.get('errors'):
+                raise HTTPException(422, result['errors'])
+            return result
     finally:
         await stop(operation['process'])
         if operation['status'] != 'canceled':
@@ -117,3 +123,11 @@ async def run_stage(stage, selection, authorization):
 @app.post('/features')
 async def features(selection: Selection, authorization: str = Header(default='')):
     return await run_stage('features', selection, authorization)
+
+@app.post('/eligibility')
+async def eligibility(selection: Selection, authorization: str = Header(default='')):
+    return await run_stage('eligibility', selection, authorization)
+
+@app.post('/score')
+async def score(selection: Selection, authorization: str = Header(default='')):
+    return await run_stage('score', selection, authorization)
