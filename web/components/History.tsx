@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import FeatureResults from "./FeatureResults";
 import ScoreResults from "./ScoreResults";
 import { SavedArtifact, SavedRun, terminal } from "../lib/history";
 export function SavedArtifactView({ artifact }: { artifact: SavedArtifact }) {
@@ -43,14 +44,16 @@ export default function History({
   runs,
   selected,
   onSelect,
+  example = false,
 }: {
   runs: SavedRun[];
+  example?: boolean;
   selected?: SavedRun;
   onSelect: (run: SavedRun) => void;
 }) {
   return (
     <div className="history">
-      <div className="card card-heading">
+      {!example && <div className="card card-heading">
         <div>
           <h2>Browser-local history</h2>
           <p>
@@ -59,7 +62,8 @@ export default function History({
           </p>
         </div>
       </div>
-      {!runs.length && (
+      }
+      {!example && !runs.length && (
         <div className="card empty">
           <h2>No saved terminal runs</h2>
           <p>
@@ -95,18 +99,27 @@ export default function History({
             </div>
           </div>
           {selected.events.some(e=>e.kind==="tool_result"&&e.payload.stage==="score") && <ScoreResults selectedIds={selected.patientIds} events={selected.events} />}
+          {selected.events.some(e => e.kind === "tool_result" && e.payload.stage === "features") && <FeatureResults selectedIds={selected.patientIds}
+            results={selected.events.filter(e => e.kind === "tool_result" && e.payload.stage === "features" && e.payload.patient).map(e => e.payload.patient)}
+            qcResults={selected.events.filter(e => e.kind === "tool_result" && e.payload.stage === "qc").map(e => e.payload.patient)}
+            maskResults={selected.events.filter(e => e.kind === "tool_result" && e.payload.stage === "masks").map(e => e.payload.patient)} />}
+          {selected.events.filter(e => e.kind === "gate" && e.payload.report).map(e => <section key={e.id} aria-label="Recorded exclusion approval">
+            <h3>Recorded exclusion disclosure</h3><p>Read-only audit · approval decision recorded in the timeline.</p>
+            <p>{e.payload.report.scoring_eligible_count} scoring-eligible patients · {e.payload.report.evaluation_eligible_count} evaluation-eligible patients</p>
+            <table><thead><tr><th>Patient</th><th>Scoring</th><th>Evaluation</th><th>Reason</th></tr></thead><tbody>{e.payload.report.dispositions.map((p:any) => <tr key={p.patient_id}><td>{p.patient_id}</td><td>{p.scoring_eligible ? "Eligible" : "Excluded"}</td><td>{p.evaluation_eligible ? "Eligible" : "Excluded"}</td><td>{p.reasons.map((r:any) => r.message).join("; ") || "Usable features and outcome"}</td></tr>)}</tbody></table>
+          </section>)}
           <p>Selected patients: {selected.patientIds.join(", ")}</p>
           {Array.from(
             new Set([
               "qc",
               "masks",
               "features",
-              "survival",
+              selected.events.some(e => e.payload.stage === "score") ? "score" : "survival",
               ...selected.events.map((e) => e.payload.stage).filter(Boolean),
             ]),
           ).map((stage) => {
             const results = selected.events.filter(
-              (e) => e.kind === "tool_result" && e.payload.stage === stage,
+              (e) => e.payload.stage === stage && (e.kind === "tool_result" || (stage === "eligibility" && e.payload.report)),
             );
             const called = selected.events.some(
               (e) => e.kind === "tool_call" && e.payload.stage === stage,
