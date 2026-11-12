@@ -15,11 +15,13 @@ from service.app import app
 from service.catalog import DATABASE_URL
 from test_engine import write_scan
 from test_masks_geometry import physical_tumor
+from test_features import varied_tumor
 
 @pytest.fixture(scope='module')
 def client(tmp_path_factory):
     root = tmp_path_factory.mktemp('api-dicom')
-    physical_tumor(root, 'TEST-CLEAN')
+    varied_tumor(root, 'TEST-CLEAN')
+    physical_tumor(root, 'TEST-CONSTANT')
     write_scan(root, 'TEST-NO-MASK')
     ct = write_scan(root, 'TEST-PRIVACY')
     ds = pydicom.dcmread(ct / '3.dcm')
@@ -33,7 +35,7 @@ def client(tmp_path_factory):
     ds.save_as(ct / '3.dcm', enforce_file_format=True)
     ct = write_scan(root, 'TEST-GEOMETRY')
     for path in list(ct.glob('*.dcm'))[1:]: path.unlink()
-    ids = ['TEST-NO-MASK','TEST-CLEAN','TEST-PRIVACY','TEST-BROKEN','TEST-SPACING','TEST-GEOMETRY']
+    ids = ['TEST-CONSTANT','TEST-NO-MASK','TEST-CLEAN','TEST-PRIVACY','TEST-BROKEN','TEST-SPACING','TEST-GEOMETRY']
     with psycopg.connect(DATABASE_URL) as conn:
         for pid in ids:
             conn.execute('INSERT INTO patient_catalog VALUES (%s,%s,true) ON CONFLICT DO NOTHING', (pid,'Automated test fixture'))
@@ -149,3 +151,30 @@ def test_reconnect_pages_drain_completed_run_without_snapshot_or_gaps(client):
     assert client.get(url + '/event-page',headers={'Authorization':'Bearer stale'}).status_code == 403
     assert client.get(url + f'/event-page?after={cursor+1}',headers=headers).status_code == 409
     assert client.get('/runs/absent/event-page',headers=headers).status_code == 404
+
+
+def test_features_are_progressive_portable_and_retain_partial_failures(client):
+    import base64
+    import csv
+    import hashlib
+    import io
+    run = client.post('/runs', json={'patient_ids':['TEST-NO-MASK','TEST-CONSTANT','TEST-CLEAN']}).json()
+    headers = {'Authorization': f"Bearer {run['secret']}"}
+    url = f"/runs/{run['id']}"
+    response = client.get(url + '/events', headers=headers)
+    result = client.get(url, headers=headers).json()
+    bad, good = result['stage_results']['features']
+    assert bad['patient_id'] == 'TEST-CONSTANT' and bad['errors'][0]['code'] == 'invalid_feature_input'
+    assert good['patient_id'] == 'TEST-CLEAN' and good['status'] == 'success'
+    assert len(good['feature_schema']) == 72
+    assert good['values']['original_shape_VoxelVolume'] == 324
+    artifact = next(a for a in good['artifacts'] if a['media_type'] == 'text/csv')
+    data = base64.b64decode(artifact['data_base64'], validate=True)
+    assert hashlib.sha256(data).hexdigest() == artifact['sha256']
+    assert list(csv.DictReader(io.StringIO(data.decode())))[0]['patient_id'] == 'TEST-CLEAN'
+    assert len(result['stage_results']['qc']) == 3 and len(result['stage_results']['masks']) == 3
+    feature_events = [e for e in result['events'] if e['kind']=='tool_result' and e['payload'].get('stage')=='features']
+    assert [e['payload']['patient']['patient_id'] for e in feature_events] == ['TEST-CONSTANT','TEST-CLEAN']
+    assert any(e['kind']=='error' and e['payload'].get('stage')=='features' and e['payload']['patient_id']=='TEST-CONSTANT' for e in result['events'])
+    assert 'Frozen-model scoring is not yet connected' in result['events'][-1]['message']
+    assert 'NaN' not in response.text

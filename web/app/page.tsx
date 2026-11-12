@@ -1,5 +1,6 @@
 "use client";
 import MaskResults, { type MaskPatientResult } from "../components/MaskResults";
+import FeatureResults, { type FeaturePatientResult } from "../components/FeatureResults";
 import { useEffect, useRef, useState } from "react";
 import History from "../components/History";
 import { reconnectRun } from "../lib/reconnect";
@@ -26,6 +27,7 @@ export default function Home() {
     [events, setEvents] = useState<Audit[]>([]),
     [results, setResults] = useState<Result[]>([]),
     [masks, setMasks] = useState<MaskPatientResult[]>([]),
+    [features, setFeatures] = useState<FeaturePatientResult[]>([]),
     [status, setStatus] = useState("idle"),
     [error, setError] = useState(""),
     [history, setHistory] = useState<SavedRun[]>([]),
@@ -84,6 +86,7 @@ export default function Home() {
   async function displayRun(run: SavedRun) {
     setEvents(run.events);
     setStatus(run.status);
+    setFeatures(run.events.filter(e => e.kind === "tool_result" && e.payload.stage === "features" && e.payload.patient).map(e => e.payload.patient));
     setResults(run.events.filter(e => e.kind === "tool_result" && e.payload.stage === "qc").map(e => e.payload.patient));
     const patients = structuredClone(run.events.filter(e => e.kind === "tool_result" && e.payload.stage === "masks").map(e => e.payload.patient));
     for (const patient of patients) {
@@ -134,6 +137,7 @@ export default function Home() {
     setEvents([]);
     setResults([]);
     setMasks([]);
+    setFeatures([]);
     setStatus("running");
     setView("Analysis");
     try {
@@ -214,7 +218,7 @@ export default function Home() {
                 </h1>
                 <p>
                   {view === "Patients"
-                    ? "Select a cohort to inspect scan quality and tumor masks."
+                    ? "Select a cohort to inspect scan quality, tumor masks and radiomic features."
                     : "An auditable view of your imaging workflow."}
                 </p>
               </div>
@@ -235,7 +239,7 @@ export default function Home() {
               </div>
               <div>
                 <small>Workflow</small>
-                <strong>QC → tumor masks</strong>
+                <strong>QC → masks → features</strong>
               </div>
             </div>
             {error && (
@@ -358,7 +362,7 @@ export default function Home() {
                   <div>
                     <small>Selected cohort</small>
                     <strong>
-                      {selection.length} patients · QC and tumor masks
+                      {selection.length} patients · QC, masks and features
                     </strong>
                   </div>
                   <span className={`status ${status}`}>
@@ -453,6 +457,7 @@ export default function Home() {
                   )}
                 </div>
                 <MaskResults selectedIds={selection} results={masks} qcResults={results} />
+                <FeatureResults selectedIds={selection} results={features} qcResults={results} maskResults={masks} />
               </>
             )}
           </section>
@@ -483,6 +488,7 @@ export default function Home() {
               <span>02</span>
               <div><strong>Tumor masks</strong><small>Aligned overlays and physical volumes</small></div>
             </div>
+            <div className="stage-list"><span>03</span><div><strong>Radiomic features</strong><small>Real quantitative measurements</small></div></div>
             <div className="timeline">
               {displayedEvents.length ? (
                 displayedEvents.map((e) => (

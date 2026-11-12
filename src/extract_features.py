@@ -8,9 +8,15 @@ import numpy as np
 import pandas as pd
 import SimpleITK as sitk
 from pathlib import Path
-from radiomics import featureextractor
+from radiomics import featureextractor, getFeatureClasses
 
 from . import config
+
+
+class FeatureError(ValueError):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
 
 
 def extract_one(image_volume, mask_volume, spacing, *, geometry=None):
@@ -21,6 +27,11 @@ def extract_one(image_volume, mask_volume, spacing, *, geometry=None):
     """
     extractor = featureextractor.RadiomicsFeatureExtractor(
         str(config.PYRADIOMICS_CONFIG))
+
+    if not np.isfinite(image_volume).all():
+        raise FeatureError('invalid_feature_input', 'Non-finite image values prevent feature extraction')
+    if extractor.settings.get('normalize') and np.std(image_volume) == 0:
+        raise FeatureError('invalid_feature_input', 'Image has zero variance; configured normalization is undefined')
 
     # SimpleITK expects (x, y, z) spacing order; numpy arrays are (z, y, x)
     sitk_spacing = tuple(reversed(spacing))
@@ -36,7 +47,21 @@ def extract_one(image_volume, mask_volume, spacing, *, geometry=None):
 
     result = extractor.execute(image, mask)
     # Keep feature values; drop the diagnostics_ metadata entries
-    return {k: float(v) for k, v in result.items() if k.startswith("original_")}
+    expected = sorted(
+        f'original_{group}_{name}'
+        for group, enabled in extractor.enabledFeatures.items()
+        for name, deprecated in getFeatureClasses()[group].getFeatureNames().items()
+        if (name in enabled if enabled else not deprecated))
+    actual = {k: v for k, v in result.items() if k.startswith('original_')}
+    if sorted(actual) != expected:
+        raise FeatureError('feature_schema_mismatch', 'Extracted features do not match the configured schema')
+    values = {}
+    for name in expected:
+        value = np.real_if_close(actual[name])
+        if np.iscomplexobj(value) or not np.isfinite(value):
+            raise FeatureError('invalid_feature_value', f'Non-finite or non-real feature: {name}')
+        values[name] = float(value)
+    return values
 
 
 def extract_all(patient_rows, output_csv=config.FEATURES_CSV):

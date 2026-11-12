@@ -3,6 +3,7 @@
 Use one EngineWorkspace context per invocation. Consume/copy artifacts before
 leaving the context: paths and the workspace are removed on success or failure.
 """
+import csv
 import hashlib
 import json
 import math
@@ -16,7 +17,7 @@ from .qc import run_qc
 from .dicom_loader import load_series, GeometryError
 from .masks import rtstruct_to_mask, MaskError
 from PIL import Image
-from .extract_features import extract_one
+from .extract_features import extract_one, FeatureError
 
 
 class EngineWorkspace:
@@ -108,6 +109,12 @@ class EngineWorkspace:
                         if not all(math.isfinite(value) for value in values.values()):
                             raise ValueError('Non-finite feature value')
                         patient['values'] = values
+                        patient['feature_schema'] = list(values)
+                        csv_path = directory / f'{patient_id}.csv'
+                        with csv_path.open('w', newline='') as stream:
+                            writer = csv.DictWriter(stream, fieldnames=['patient_id', *values])
+                            writer.writeheader()
+                            writer.writerow({'patient_id': patient_id, **values})
                         path = directory / f'{patient_id}.json'
                         path.write_text(json.dumps(values, allow_nan=False))
                         media_type = 'application/json'
@@ -116,12 +123,16 @@ class EngineWorkspace:
                         'role': 'mask' if stage == 'masks' else 'features',
                         'size_bytes': path.stat().st_size,
                         'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}]
+                    if stage == 'features':
+                        patient['artifacts'].append({'path': str(csv_path.relative_to(self.path)),
+                            'role': 'feature_csv', 'media_type': 'text/csv', 'size_bytes': csv_path.stat().st_size,
+                            'sha256': hashlib.sha256(csv_path.read_bytes()).hexdigest()})
                     if stage == 'masks':
                         patient['artifacts'].append({'path': str(overlay_path.relative_to(self.path)),
                             'role': 'overlay', 'media_type': 'image/png', 'size_bytes': overlay_path.stat().st_size,
                             'sha256': hashlib.sha256(overlay_path.read_bytes()).hexdigest()})
                 patient['status'] = 'failed' if patient['errors'] else 'success'
-            except (GeometryError, MaskError) as exc:
+            except (GeometryError, MaskError, FeatureError) as exc:
                 patient['errors'].append(_error(getattr(exc, 'code', 'unsupported_geometry'), str(exc)))
             except Exception as exc:
                 # Retain identity from the selection, never from a malformed header.

@@ -54,7 +54,7 @@ async def invoke_stage(stage, patient_id):
     return result['patients'][0]
 
 async def execute(run):
-    emit(run, 'plan', f"Check {len(run['patient_ids'])} selected patients with real DICOM QC, then construct verified tumor masks for passing patients.")
+    emit(run, 'plan', f"Check {len(run['patient_ids'])} selected patients with real DICOM QC, construct verified tumor masks, then extract radiomic features for passing patients.")
     try:
         for patient_id in run['patient_ids']:
             emit(run, 'tool_call', f'QC · {patient_id}', {'stage': 'qc', 'patient_id': patient_id})
@@ -81,9 +81,23 @@ async def execute(run):
             if patient['errors']:
                 reasons = '; '.join(error['message'] for error in patient['errors'])
                 emit(run, 'error', f'{patient_id}: {reasons}; patient excluded.', {'stage': 'masks', 'patient_id': patient_id, 'errors': patient['errors']})
+        for masked in run['stage_results']['masks']:
+            if masked['status'] != 'success':
+                continue
+            patient_id = masked['patient_id']
+            emit(run, 'tool_call', f'Feature extraction · {patient_id}', {'stage': 'features', 'patient_id': patient_id})
+            patient = await invoke_stage('features', patient_id)
+            run['stage_results']['features'].append(patient)
+            count = len(patient.get('feature_schema', []))
+            message = f'{patient_id}: {count} radiomic features ready.' if patient['status'] == 'success' else f'{patient_id}: feature extraction failed.'
+            emit(run, 'tool_result', message, {'stage': 'features', 'patient': patient})
+            if patient['errors']:
+                reasons = '; '.join(error['message'] for error in patient['errors'])
+                emit(run, 'error', f'{patient_id}: {reasons}; patient excluded from scoring.', {'stage': 'features', 'patient_id': patient_id, 'errors': patient['errors']})
         run['status'] = 'completed'
         succeeded = sum(p['status'] == 'success' for p in run['stage_results']['masks'])
-        emit(run, 'done', f'QC and mask construction complete: {succeeded} masks available. Feature extraction and scoring are not yet connected.', {'status': 'completed', 'selected': len(run['patient_ids']), 'passed': sum(p['status'] == 'success' for p in run['patients']), 'masks_succeeded': succeeded})
+        featured = sum(p['status'] == 'success' for p in run['stage_results']['features'])
+        emit(run, 'done', f'QC, masks and feature extraction complete: {succeeded} masks and {featured} feature rows available. Frozen-model scoring is not yet connected.', {'status': 'completed', 'selected': len(run['patient_ids']), 'passed': sum(p['status'] == 'success' for p in run['patients']), 'masks_succeeded': succeeded, 'features_succeeded': featured})
     except Exception:
         run['status'] = 'failed'
         emit(run, 'error', 'Imaging service unavailable; available patient results retained.', {'code': 'engine_unavailable'})
@@ -96,7 +110,7 @@ async def create_run(selection: Selection):
     if not ids or len(ids) != len(set(ids)) or not set(ids).issubset(known):
         raise HTTPException(422, 'Select one or more distinct patients from the available catalog')
     run = {'id': str(uuid.uuid4()), 'secret': secrets.token_urlsafe(32), 'status': 'running',
-           'patient_ids': ids, 'patients': [], 'stage_results': {'qc': [], 'masks': []}, 'events': [], 'touched': time.monotonic()}
+           'patient_ids': ids, 'patients': [], 'stage_results': {'qc': [], 'masks': [], 'features': []}, 'events': [], 'touched': time.monotonic()}
     runs[run['id']] = run
     run['task'] = asyncio.create_task(execute(run))
     return {'id': run['id'], 'secret': run['secret'], 'status': run['status']}
