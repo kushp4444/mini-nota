@@ -17,4 +17,9 @@ def model_metadata():
             row = conn.execute('SELECT metadata FROM model_metadata WHERE singleton').fetchone()
         except psycopg.errors.UndefinedTable:
             return None
-        return row[0] if row else None
+        if not row:return None
+        metadata = row[0]
+        if conn.execute("SELECT to_regclass('model_evaluation')").fetchone()[0]:
+            evaluation = conn.execute('SELECT evaluation FROM model_evaluation WHERE model_version=%s',(metadata['model_version'],)).fetchone()
+            if evaluation:metadata['evaluation']=evaluation[0]
+        return metadata

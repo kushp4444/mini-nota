@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import ScoreResults from "./ScoreResults";
 import { SavedArtifact, SavedRun, terminal } from "../lib/history";
 export function SavedArtifactView({ artifact }: { artifact: SavedArtifact }) {
   const [url, setUrl] = useState("");
@@ -93,6 +94,7 @@ export default function History({
               <p>Read-only · engine is not rerun</p>
             </div>
           </div>
+          {selected.events.some(e=>e.kind==="tool_result"&&e.payload.stage==="score") && <ScoreResults selectedIds={selected.patientIds} events={selected.events} />}
           <p>Selected patients: {selected.patientIds.join(", ")}</p>
           {Array.from(
             new Set([

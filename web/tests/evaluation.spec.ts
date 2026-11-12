@@ -1,0 +1,45 @@
+import { test, expect } from '@playwright/test';
+
+test('fixed held-out evaluation stays visible beside a one-patient exploratory result', async ({page,request}) => {
+  test.setTimeout(120000);
+  const response=await request.post('/api/graphql',{data:{query:'{ modelMetadata { model_version evaluation { evaluation_version c_index evaluated_count } } }'}});
+  const metadata=(await response.json()).data?.modelMetadata;
+  expect(metadata?.evaluation.evaluated_count).toBe(82);
+  expect(metadata.evaluation.c_index).toBeCloseTo(.6057961981925833,12);
+  await page.goto('/');
+  await expect(page.getByText('82 available patients')).toBeVisible();
+  await page.getByRole('button',{name:'Analysis',exact:true}).click();
+  const full=page.getByLabel('Full held-out evaluation',{exact:true});
+  await expect(full.getByText('0.606',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Patients',exact:true}).click();
+  await page.getByLabel('Select all patients').uncheck();
+  await page.getByLabel('Select LUNG1-002',{exact:true}).check();
+  await page.getByRole('button',{name:'Run analysis'}).click();
+  await expect(page.getByText('1 / 1 scored',{exact:true})).toBeVisible({timeout:90000});
+  await expect(full.getByText('0.606',{exact:true})).toBeVisible();
+  const selected=page.getByLabel('Selected cohort exploratory evaluation',{exact:true});
+  await expect(selected.getByText(/At least two patients/)).toBeVisible();
+  await expect(selected.getByRole('img',{name:'Observed Kaplan–Meier survival'})).toBeVisible();
+  await expect(selected.getByText(/Only one model-risk group/)).toBeVisible();
+  const row=page.getByRole('table',{name:'Patient risk scores'}).getByRole('row').nth(1);
+  await expect(row).toContainText('higher model risk');
+  await expect(row).toContainText(metadata.model_version);
+  const saved=await page.evaluate(async()=>{
+    const db=await new Promise<IDBDatabase>(resolve=>{const r=indexedDB.open('mini-nota-history');r.onsuccess=()=>resolve(r.result);});
+    const rows=await new Promise<any[]>(resolve=>{const r=db.transaction('runs').objectStore('runs').getAll();r.onsuccess=()=>resolve(r.result);});db.close();return rows[0];
+  });
+  const query='query($id:ID!){runResults(id:$id){scores{patient_id risk_percentile risk_group} evaluation{c_index evaluated_count unavailable_reason curves{group count points{time survival}}}}}';
+  const result=await request.post('/api/graphql',{headers:{Authorization:`Bearer ${saved.secret}`},data:{query,variables:{id:saved.id}}});
+  const api=(await result.json()).data.runResults;
+  expect(api.evaluation.evaluated_count).toBe(1);
+  expect(api.evaluation.c_index).toBeNull();
+  expect(api.scores[0].risk_percentile).toBeCloseTo(96.08433734939759,10);
+  await page.screenshot({path:'/private/tmp/mini-nota-implementation/ticket8-evaluation.png',fullPage:true});
+  await page.getByRole('button',{name:'History',exact:true}).click();
+  await page.getByRole('button',{name:`Open run ${saved.id}`,exact:true}).click();
+  await expect(page.getByLabel('Selected cohort exploratory evaluation',{exact:true}).getByRole('img')).toBeVisible();
+  await page.reload();
+  await page.getByRole('button',{name:'History',exact:true}).click();
+  await page.getByRole('button',{name:`Open run ${saved.id}`,exact:true}).click();
+  await expect(page.getByLabel('Selected cohort exploratory evaluation',{exact:true}).getByRole('img')).toBeVisible();
+});

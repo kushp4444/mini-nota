@@ -1,0 +1,464 @@
+{
+  "bundle_sha256": "a617eb0b5e628654964b7f45291995cdd7aee4c85d3f01fb189ccd13f58829dc",
+  "c_index": 0.6057961981925833,
+  "censored_count": 9,
+  "context": "Prepared imaging-eligible Lung1 cohort, partition reserved before development; frozen model and split were not tuned after evaluation.",
+  "curve_context": "Observed survival by fixed development-median model-risk group; separation is not guaranteed.",
+  "curves": [
+    {
+      "count": 43,
+      "events": 39,
+      "group": "lower model risk",
+      "points": [
+        {
+          "survival": 1.0,
+          "time": 0.0
+        },
+        {
+          "survival": 0.9767441860465118,
+          "time": 100.0
+        },
+        {
+          "survival": 0.9534883720930234,
+          "time": 159.0
+        },
+        {
+          "survival": 0.9302325581395349,
+          "time": 211.0
+        },
+        {
+          "survival": 0.9302325581395349,
+          "time": 314.0
+        },
+        {
+          "survival": 0.9063804412641622,
+          "time": 361.0
+        },
+        {
+          "survival": 0.8825283243887895,
+          "time": 367.0
+        },
+        {
+          "survival": 0.8586762075134169,
+          "time": 375.0
+        },
+        {
+          "survival": 0.8348240906380441,
+          "time": 391.0
+        },
+        {
+          "survival": 0.8109719737626717,
+          "time": 444.0
+        },
+        {
+          "survival": 0.7871198568872988,
+          "time": 457.0
+        },
+        {
+          "survival": 0.7632677400119261,
+          "time": 479.0
+        },
+        {
+          "survival": 0.7394156231365535,
+          "time": 485.0
+        },
+        {
+          "survival": 0.7155635062611808,
+          "time": 491.0
+        },
+        {
+          "survival": 0.6917113893858081,
+          "time": 502.0
+        },
+        {
+          "survival": 0.6678592725104353,
+          "time": 583.0
+        },
+        {
+          "survival": 0.6440071556350627,
+          "time": 625.0
+        },
+        {
+          "survival": 0.62015503875969,
+          "time": 638.0
+        },
+        {
+          "survival": 0.5963029218843172,
+          "time": 639.0
+        },
+        {
+          "survival": 0.5724508050089447,
+          "time": 687.0
+        },
+        {
+          "survival": 0.5485986881335719,
+          "time": 699.0
+        },
+        {
+          "survival": 0.5247465712581993,
+          "time": 907.0
+        },
+        {
+          "survival": 0.5008944543828265,
+          "time": 1000.0
+        },
+        {
+          "survival": 0.4770423375074538,
+          "time": 1076.0
+        },
+        {
+          "survival": 0.4531902206320811,
+          "time": 1141.0
+        },
+        {
+          "survival": 0.4293381037567084,
+          "time": 1188.0
+        },
+        {
+          "survival": 0.4054859868813358,
+          "time": 1235.0
+        },
+        {
+          "survival": 0.38163387000596305,
+          "time": 1238.0
+        },
+        {
+          "survival": 0.3577817531305904,
+          "time": 1508.0
+        },
+        {
+          "survival": 0.3339296362552176,
+          "time": 1531.0
+        },
+        {
+          "survival": 0.310077519379845,
+          "time": 1590.0
+        },
+        {
+          "survival": 0.310077519379845,
+          "time": 1596.0
+        },
+        {
+          "survival": 0.28423772609819126,
+          "time": 1634.0
+        },
+        {
+          "survival": 0.25839793281653756,
+          "time": 1686.0
+        },
+        {
+          "survival": 0.23255813953488377,
+          "time": 1731.0
+        },
+        {
+          "survival": 0.20671834625322996,
+          "time": 1802.0
+        },
+        {
+          "survival": 0.18087855297157623,
+          "time": 1850.0
+        },
+        {
+          "survival": 0.15503875968992248,
+          "time": 1853.0
+        },
+        {
+          "survival": 0.12919896640826875,
+          "time": 1956.0
+        },
+        {
+          "survival": 0.10335917312661501,
+          "time": 1967.0
+        },
+        {
+          "survival": 0.10335917312661501,
+          "time": 1972.0
+        },
+        {
+          "survival": 0.06890611541774333,
+          "time": 2380.0
+        },
+        {
+          "survival": 0.03445305770887166,
+          "time": 3494.0
+        },
+        {
+          "survival": 0.03445305770887166,
+          "time": 3551.0
+        }
+      ]
+    },
+    {
+      "count": 39,
+      "events": 34,
+      "group": "higher model risk",
+      "points": [
+        {
+          "survival": 1.0,
+          "time": 0.0
+        },
+        {
+          "survival": 0.9743589743589743,
+          "time": 101.0
+        },
+        {
+          "survival": 0.9487179487179488,
+          "time": 131.0
+        },
+        {
+          "survival": 0.8974358974358974,
+          "time": 132.0
+        },
+        {
+          "survival": 0.871794871794872,
+          "time": 151.0
+        },
+        {
+          "survival": 0.8461538461538463,
+          "time": 155.0
+        },
+        {
+          "survival": 0.8205128205128206,
+          "time": 166.0
+        },
+        {
+          "survival": 0.794871794871795,
+          "time": 208.0
+        },
+        {
+          "survival": 0.7692307692307694,
+          "time": 245.0
+        },
+        {
+          "survival": 0.717948717948718,
+          "time": 249.0
+        },
+        {
+          "survival": 0.6923076923076924,
+          "time": 257.0
+        },
+        {
+          "survival": 0.6666666666666669,
+          "time": 258.0
+        },
+        {
+          "survival": 0.641025641025641,
+          "time": 261.0
+        },
+        {
+          "survival": 0.6153846153846155,
+          "time": 280.0
+        },
+        {
+          "survival": 0.5897435897435898,
+          "time": 325.0
+        },
+        {
+          "survival": 0.5641025641025643,
+          "time": 357.0
+        },
+        {
+          "survival": 0.5384615384615385,
+          "time": 370.0
+        },
+        {
+          "survival": 0.5128205128205128,
+          "time": 381.0
+        },
+        {
+          "survival": 0.48717948717948717,
+          "time": 409.0
+        },
+        {
+          "survival": 0.4615384615384615,
+          "time": 618.0
+        },
+        {
+          "survival": 0.435897435897436,
+          "time": 666.0
+        },
+        {
+          "survival": 0.4102564102564103,
+          "time": 670.0
+        },
+        {
+          "survival": 0.38461538461538464,
+          "time": 673.0
+        },
+        {
+          "survival": 0.3589743589743589,
+          "time": 714.0
+        },
+        {
+          "survival": 0.33333333333333337,
+          "time": 720.0
+        },
+        {
+          "survival": 0.30769230769230776,
+          "time": 859.0
+        },
+        {
+          "survival": 0.2820512820512821,
+          "time": 999.0
+        },
+        {
+          "survival": 0.2564102564102565,
+          "time": 1013.0
+        },
+        {
+          "survival": 0.23076923076923084,
+          "time": 1020.0
+        },
+        {
+          "survival": 0.20512820512820512,
+          "time": 1286.0
+        },
+        {
+          "survival": 0.1794871794871795,
+          "time": 1357.0
+        },
+        {
+          "survival": 0.15384615384615385,
+          "time": 2472.0
+        },
+        {
+          "survival": 0.12820512820512825,
+          "time": 2521.0
+        },
+        {
+          "survival": 0.12820512820512825,
+          "time": 2772.0
+        },
+        {
+          "survival": 0.12820512820512825,
+          "time": 3402.0
+        },
+        {
+          "survival": 0.12820512820512825,
+          "time": 3480.0
+        },
+        {
+          "survival": 0.12820512820512825,
+          "time": 4328.0
+        },
+        {
+          "survival": 0.12820512820512825,
+          "time": 4454.0
+        }
+      ]
+    }
+  ],
+  "evaluated_count": 82,
+  "evaluated_patients": [
+    "LUNG1-002",
+    "LUNG1-009",
+    "LUNG1-015",
+    "LUNG1-016",
+    "LUNG1-023",
+    "LUNG1-024",
+    "LUNG1-027",
+    "LUNG1-028",
+    "LUNG1-029",
+    "LUNG1-031",
+    "LUNG1-038",
+    "LUNG1-048",
+    "LUNG1-050",
+    "LUNG1-056",
+    "LUNG1-058",
+    "LUNG1-059",
+    "LUNG1-067",
+    "LUNG1-069",
+    "LUNG1-070",
+    "LUNG1-084",
+    "LUNG1-088",
+    "LUNG1-091",
+    "LUNG1-093",
+    "LUNG1-098",
+    "LUNG1-117",
+    "LUNG1-118",
+    "LUNG1-119",
+    "LUNG1-134",
+    "LUNG1-138",
+    "LUNG1-150",
+    "LUNG1-152",
+    "LUNG1-156",
+    "LUNG1-164",
+    "LUNG1-167",
+    "LUNG1-179",
+    "LUNG1-181",
+    "LUNG1-183",
+    "LUNG1-188",
+    "LUNG1-207",
+    "LUNG1-215",
+    "LUNG1-216",
+    "LUNG1-217",
+    "LUNG1-218",
+    "LUNG1-228",
+    "LUNG1-231",
+    "LUNG1-232",
+    "LUNG1-236",
+    "LUNG1-240",
+    "LUNG1-250",
+    "LUNG1-254",
+    "LUNG1-266",
+    "LUNG1-273",
+    "LUNG1-280",
+    "LUNG1-281",
+    "LUNG1-283",
+    "LUNG1-289",
+    "LUNG1-293",
+    "LUNG1-298",
+    "LUNG1-306",
+    "LUNG1-307",
+    "LUNG1-309",
+    "LUNG1-311",
+    "LUNG1-318",
+    "LUNG1-322",
+    "LUNG1-323",
+    "LUNG1-327",
+    "LUNG1-330",
+    "LUNG1-340",
+    "LUNG1-346",
+    "LUNG1-350",
+    "LUNG1-361",
+    "LUNG1-368",
+    "LUNG1-370",
+    "LUNG1-373",
+    "LUNG1-386",
+    "LUNG1-388",
+    "LUNG1-397",
+    "LUNG1-398",
+    "LUNG1-406",
+    "LUNG1-416",
+    "LUNG1-419",
+    "LUNG1-422"
+  ],
+  "evaluation_version": "held-out-v1-59301a6ba6104aea1954",
+  "event_count": 73,
+  "exclusions": [],
+  "features_sha256": "1b99125598717eb35b9ab1358a75ca5dae735bef68f4c25e219b5c929f383b1e",
+  "held_out_count": 82,
+  "method": "Harrell concordance (lifelines); higher log-risk predicts shorter survival; tied risks receive half credit; censored pairs follow lifelines admissibility rules",
+  "model_version": "cox-v1-a8e2738d012902a6f717",
+  "outcomes_sha256": "1ff3c14459fced4bc1b2e519455e4f96a02812a1af96e88e8401deb3e902a4c2",
+  "partition_sha256": "19e041a983bf105e890bd8c909b6ff3782b26336ddd5ac1e20562de71ebdf799",
+  "processing_exclusions": [],
+  "reference_count": 332,
+  "schema_version": 1,
+  "scope": "full frozen held-out cohort",
+  "selected_count": 82,
+  "time_unit": "days",
+  "unavailable_reason": null,
+  "uncertainty": {
+    "context": "Finite held-out cohort; concordance is uncertain and does not establish clinical validity. Selected-cohort estimates are exploratory.",
+    "estimable_samples": 2000,
+    "interval": [
+      0.5326564103414366,
+      0.6739709514124799
+    ],
+    "method": "patient-level nonparametric percentile bootstrap, 95% interval; NumPy default_rng PCG64; unestimable resamples omitted and counted; linear quantiles",
+    "requested_samples": 2000,
+    "seed": 1729,
+    "unestimable_samples": 0
+  }
+}
