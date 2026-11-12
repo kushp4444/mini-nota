@@ -40,3 +40,9 @@ TDD's initial browser test failed because the completed-example action was absen
 - Visually inspected the full actual success example screenshot at `/private/tmp/mini-nota-implementation/ticket14-example.png`; overlay masks and evaluation/feature sections render. This is a local runtime receipt, not a committed product image.
 
 Static example assets are allowed server-side product assets under ADR 0001. No server visitor persistence or hosted deployment is introduced. Deployment must ship `web/public/examples` with the frontend; viewing these assets needs no Python worker. Live computation continues to require the external runner/private engine and PostgreSQL.
+
+## Integration receipt
+
+Merged into `codex/mini-nota-mvp` at `8d57768`. Independent integration verification used the production frontend on isolated port 3154: `npx tsc --noEmit`, `npm run build -- --webpack`, and Chromium `examples.spec.ts history.spec.ts` all passed (12 browser tests). No integration source fixes were needed. Exported asset hashes match the provenance receipt above; the exporter and loader were inspected for capability stripping and reuse of `captureEvent`/the normal History renderer.
+
+The public GraphQL endpoint returned the unchanged 82-patient catalog with every `fixture=false`, frozen model `cox-v1-a8e2738d012902a6f717`, and 82 evaluated patients at c-index 0.6057961981925833. The synthetic malformed scan and removed outcome remain confined to the labeled static example. The production success screen visibly preserves the actual selected c-index 0.000 and single model-risk group. Independent screenshots are `/private/tmp/mini-nota-implementation/ticket14-integrated-success.png` (visually inspected) and `/private/tmp/mini-nota-implementation/ticket14-integrated-failure.png`.
