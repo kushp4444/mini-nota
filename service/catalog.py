@@ -2,7 +2,7 @@
 import os
 import psycopg
 
-DATABASE_URL = os.environ.get('DATABASE_URL', 'postgresql://mini_nota@127.0.0.1:55432/mini_nota')
+DATABASE_URL = os.environ.get('CATALOG_DATABASE_URL') or os.environ.get('DATABASE_URL', 'postgresql://mini_nota@127.0.0.1:55432/mini_nota')
 
 def patients():
     with psycopg.connect(DATABASE_URL) as conn:

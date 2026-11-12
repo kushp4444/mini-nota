@@ -1,0 +1,182 @@
+"""Durable run and worker ownership boundary; no imaging/native dependencies.
+
+All writes lock the run row. Worker publications additionally require an exact
+operation/owner/fence, current revision and absent durable cancellation intent.
+Time alone never transfers an operation. See docs/ticket-16-handoff.md.
+"""
+import asyncio
+import hashlib
+import hmac
+import json
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+import psycopg
+from psycopg.types.json import Jsonb
+
+TERMINAL = {'completed', 'failed', 'canceled'}
+
+
+class Conflict(Exception):
+    pass
+
+
+class RunRepository:
+    def __init__(self, database_url):
+        self.database_url = database_url
+
+    def initialize(self):
+        with psycopg.connect(self.database_url) as conn:
+            conn.execute(Path(__file__).parents[1].joinpath('migrations/001_runs.sql').read_text())
+
+    def get(self, run_id):
+        with psycopg.connect(self.database_url) as conn:
+            row = conn.execute('SELECT document, revision, secret_digest FROM visitor_runs WHERE id=%s', (run_id,)).fetchone()
+        if not row:
+            return None
+        return {**row[0], '_revision':row[1], '_secret_digest':row[2]}
+
+    def authorize(self, run_id, secret):
+        run = self.get(run_id)
+        if run and not hmac.compare_digest(run.pop('_secret_digest'), hashlib.sha256(secret.encode()).hexdigest()):
+            raise PermissionError('Run access denied')
+        if run:
+            run['secret'] = secret
+        return run
+
+    def create(self, run, nonce=None, phase='imaging'):
+        """Atomic launch receipt and dispatch intent. Returns (snapshot, created)."""
+        with psycopg.connect(self.database_url) as conn:
+            inserted = conn.execute('INSERT INTO visitor_runs(id,launch_nonce,secret_digest,document) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING id',
+                         (run['id'], nonce, hashlib.sha256(run['secret'].encode()).hexdigest(), Jsonb(self.document(run)))).fetchone()
+            row = conn.execute('SELECT id, document, revision,secret_digest FROM visitor_runs WHERE id=%s FOR UPDATE', (run['id'],)).fetchone()
+            if row is None or row[1]['patient_ids'] != run['patient_ids'] or not hmac.compare_digest(row[3],hashlib.sha256(run['secret'].encode()).hexdigest()):
+                raise Conflict('Launch identity was already used for a different selection or capability')
+            created = bool(inserted)
+            if created:
+                if phase:
+                    self._operation(conn,run['id'],phase,0)
+                conn.execute('UPDATE visitor_runs SET revision=1 WHERE id=%s', (run['id'],))
+            return {**row[1], 'secret':run['secret'], '_revision':1 if created else row[2]}, created
+
+    @staticmethod
+    def document(run):
+        def reject(value):
+            if isinstance(value, dict):
+                if 'data_base64' in value:
+                    raise ValueError('Binary artifacts must be externalized before persistence')
+                return {k:reject(v) for k,v in value.items()}
+            if isinstance(value, list):
+                return [reject(v) for v in value]
+            return value
+        return reject({k:v for k,v in run.items() if not k.startswith('_') and k not in {'secret','task','control_lock','touched'}})
+
+    def _operation(self, conn, run_id, phase, generation):
+        operation_id = hashlib.sha256(f'{run_id}:{phase}:{generation}'.encode()).hexdigest()
+        inserted = conn.execute('INSERT INTO execution_operations(id,run_id,phase,generation) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING id',
+                                (operation_id,run_id,phase,generation)).fetchone()
+        return {'id':operation_id,'new':bool(inserted)}
+
+    def operation(self, run_id, phase='imaging', generation=0):
+        with psycopg.connect(self.database_url) as conn:
+            row = conn.execute('SELECT id,status,owner,fence,submission_state FROM execution_operations WHERE run_id=%s AND phase=%s AND generation=%s', (run_id,phase,generation)).fetchone()
+        return dict(zip(('id','status','owner','fence','submission_state'),row)) if row else None
+
+    def operation_context(self, operation_id):
+        """Private worker bootstrap; snapshot contains a digest, no capability."""
+        with psycopg.connect(self.database_url) as conn:
+            row = conn.execute('SELECT run_id,phase,generation FROM execution_operations WHERE id=%s',(operation_id,)).fetchone()
+        if not row:
+            return None
+        return {'run':self.get(row[0]),'phase':row[1],'generation':row[2]}
+
+    def register_submission(self, operation_id, submission_id, provider_call_id=None, ambiguous=False):
+        """Record every dispatch attempt, including unknown provider acceptance.
+
+        This never claims compute ownership or clears an existing owner.
+        """
+        with psycopg.connect(self.database_url) as conn:
+            conn.execute('INSERT INTO operation_submissions(operation_id,submission_id,provider_call_id,ambiguous) VALUES (%s,%s,%s,%s) ON CONFLICT (operation_id,submission_id) DO UPDATE SET provider_call_id=COALESCE(EXCLUDED.provider_call_id,operation_submissions.provider_call_id),ambiguous=EXCLUDED.ambiguous',
+                         (operation_id,submission_id,provider_call_id,ambiguous))
+            conn.execute("UPDATE execution_operations SET submission_state=%s WHERE id=%s AND status='pending'", ('ambiguous' if ambiguous else 'submitted',operation_id))
+
+    def claim(self, operation_id, owner):
+        """Worker self-registration, BEFORE loading scans/importing native code.
+
+        Returns fence token or None. Duplicate invocation/claim never computes.
+        """
+        with psycopg.connect(self.database_url) as conn:
+            op = conn.execute('SELECT run_id,phase,generation FROM execution_operations WHERE id=%s', (operation_id,)).fetchone()
+            if not op:
+                return None
+            run = conn.execute('SELECT document,cancel_intent FROM visitor_runs WHERE id=%s FOR UPDATE',(op[0],)).fetchone()
+            if run[1] or run[0]['status'] != 'running' or (op[1] == 'scoring' and (op[2] != run[0].get('gate_generation') or run[0].get('approved_disclosure') != (run[0].get('checkpoint') or {}).get('disclosure_id'))):
+                return None
+            row = conn.execute("UPDATE execution_operations SET owner=%s,fence=fence+1,status='owned' WHERE id=%s AND status='pending' AND owner IS NULL RETURNING fence", (owner,operation_id)).fetchone()
+            return row[0] if row else None
+
+    def publish(self, run, operation=None, cancel=False, approve=False):
+        """Atomic snapshot/results + ordered audit + operation transition.
+
+        Stale writers fail closed, including canceled or superseded workers.
+        Approval creates one scoring intent in the SAME transaction as audit.
+        """
+        document = self.document(run)
+        with psycopg.connect(self.database_url) as conn:
+            old = conn.execute('SELECT document,revision,cancel_intent FROM visitor_runs WHERE id=%s FOR UPDATE',(run['id'],)).fetchone()
+            if old is None or old[1] != run['_revision']:
+                raise Conflict('Run changed; reload before publishing')
+            if operation:
+                row = conn.execute('SELECT status,owner,fence FROM execution_operations WHERE id=%s AND run_id=%s FOR UPDATE',(operation['id'],run['id'])).fetchone()
+                if not row or row != ('owned',operation['owner'],operation['fence']) or old[2]:
+                    raise Conflict('Worker lost ownership or run was canceled')
+            if old[0]['status'] in TERMINAL and document != old[0] and not (operation and document['status'] == old[0]['status']):
+                raise Conflict('Terminal run is immutable')
+            if old[2] and run['status'] not in {'canceling','canceled'}:
+                raise Conflict('Cancellation blocks advancement')
+            old_events = old[0].get('events',[])
+            events = document.get('events',[])
+            if events[:len(old_events)] != old_events:
+                raise Conflict('Audit history cannot be rewritten')
+            for event in events[len(old_events):]:
+                conn.execute('INSERT INTO run_events(run_id,sequence,event) VALUES (%s,%s,%s)',(run['id'],event['sequence'],Jsonb(event)))
+            conn.execute('UPDATE visitor_runs SET document=%s,revision=revision+1,cancel_intent=cancel_intent OR %s WHERE id=%s', (Jsonb(document),cancel,run['id']))
+            if approve:
+                self._operation(conn,run['id'],'scoring',run['gate_generation'])
+            if operation and document.get('events') and document['events'][-1]['kind'] in {'done','gate'}:
+                conn.execute("UPDATE execution_operations SET status='finished' WHERE id=%s", (operation['id'],))
+            if run['status'] == 'canceled':
+                conn.execute("UPDATE execution_operations SET status='stopped' WHERE run_id=%s AND status IN ('pending','owned')",(run['id'],))
+        run['_revision'] += 1
+
+    def reconcile_stopped(self, operation_id, owner, fence):
+        """Only call after provider proves invocation stopped/terminal.
+
+        Explicitly records interrupted failure; elapsed leases never suffice.
+        Returns whether the supplied ownership still matched.
+        """
+        with psycopg.connect(self.database_url) as conn:
+            row = conn.execute("UPDATE execution_operations SET status='interrupted' WHERE id=%s AND owner=%s AND fence=%s AND status='owned' RETURNING id",(operation_id,owner,fence)).fetchone()
+            return bool(row)
+
+    def active_owners(self, run_id):
+        with psycopg.connect(self.database_url) as conn:
+            rows = conn.execute("SELECT id,owner,fence FROM execution_operations WHERE run_id=%s AND status='owned'",(run_id,)).fetchall()
+            return [dict(zip(('id','owner','fence'),row)) for row in rows]
+
+    def pending(self, limit=20):
+        """Private dispatcher reconciliation input, NEVER a public run listing."""
+        with psycopg.connect(self.database_url) as conn:
+            rows = conn.execute("SELECT o.id,o.run_id,o.status,o.owner,o.fence,o.submission_state,r.cancel_intent FROM execution_operations o JOIN visitor_runs r ON r.id=o.run_id WHERE o.status IN ('pending','owned') ORDER BY o.created_at LIMIT %s",(min(limit,100),)).fetchall()
+            return [dict(zip(('id','run_id','status','owner','fence','submission_state','cancel_intent'),r)) for r in rows]
+
+    @asynccontextmanager
+    async def control(self, run_id):
+        # Transaction-scoped advisory locks also work through transaction poolers.
+        conn = psycopg.connect(self.database_url,autocommit=False)
+        try:
+            while not conn.execute('SELECT pg_try_advisory_xact_lock(hashtextextended(%s,0))',(run_id,)).fetchone()[0]:
+                await asyncio.sleep(.02)
+            yield
+        finally:
+            conn.close()
