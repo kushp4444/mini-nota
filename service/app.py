@@ -79,6 +79,9 @@ async def owned_execution(run, phase='imaging', generation=0):
     except Conflict:
         # A concurrent cancel/control transaction fenced this worker out.
         return
+    finally:
+        if repo and run.get('status') != 'running' and runs.get(run['id']) is run:
+            runs.pop(run['id'],None)
 
 def checkpoint_rows(checkpoint):
     return [{'patient_id':r['patient_id'],'feature_schema':checkpoint['feature_schema'],
@@ -128,7 +131,7 @@ async def lifespan(app):
         while True:
             await asyncio.sleep(float(os.environ.get('RUN_CLEANUP_INTERVAL', '60')))
             for key, run in list(runs.items()):
-                if not repository() and run['status'] in ('completed', 'failed', 'canceled') and time.monotonic() - run['touched'] > RETENTION_SECONDS:
+                if run['status'] in ('completed', 'failed', 'canceled') and time.monotonic() - run['touched'] > RETENTION_SECONDS:
                     del runs[key]
     task = asyncio.create_task(cleanup())
     yield
@@ -394,6 +397,7 @@ async def approve_run(run_id: str, approval: Approval, authorization: str = Head
         emit(run,'decision','Anonymous run approval recorded for the disclosed cohort and frozen model.',
              {'action':'approve','disclosure_id':approval.disclosure_id,'model_version':approval.model_version,'report':report,'status':'running'})
         if os.environ.get('EXECUTION_BACKEND','local') == 'local':
+            runs[run['id']] = run
             run['task'] = asyncio.create_task(owned_execution(run,'scoring',run['gate_generation']))
         return {'id':run_id,'status':run['status']}
 
@@ -457,7 +461,7 @@ async def create_run(selection: Selection):
         if not created:
             return {'id':run['id'],'secret':run['secret'],'status':run['status']}
     runs[run['id']] = run
-    if nonce:
+    if nonce and not repo:
         launches[nonce] = {'id': run['id'], 'patient_ids': list(ids)}
     if os.environ.get('EXECUTION_BACKEND','local') == 'local':
         run['task'] = asyncio.create_task(owned_execution(run))
@@ -645,6 +649,8 @@ async def cancel_run(run_id: str, authorization: str = Header(default='')):
                 pass
         run['status'] = 'canceled'
         emit(run, 'done', 'Run canceled by visitor; available results retained.', {'status': 'canceled', 'reason': 'Canceled by visitor'})
+        if repository():
+            runs.pop(run_id,None)
         return {'id': run_id, 'status': 'canceled'}
 
 

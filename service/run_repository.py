@@ -7,7 +7,6 @@ Time alone never transfers an operation. See docs/ticket-16-handoff.md.
 import asyncio
 import hashlib
 import hmac
-import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -100,6 +99,12 @@ class RunRepository:
                          (operation_id,submission_id,provider_call_id,ambiguous))
             conn.execute("UPDATE execution_operations SET submission_state=%s WHERE id=%s AND status='pending'", ('ambiguous' if ambiguous else 'submitted',operation_id))
 
+    def submissions(self, operation_id):
+        """Private provider-reconciliation registrations, including ambiguity."""
+        with psycopg.connect(self.database_url) as conn:
+            rows = conn.execute('SELECT submission_id,provider_call_id,ambiguous FROM operation_submissions WHERE operation_id=%s ORDER BY created_at,submission_id',(operation_id,)).fetchall()
+            return [dict(zip(('submission_id','provider_call_id','ambiguous'),row)) for row in rows]
+
     def claim(self, operation_id, owner):
         """Worker self-registration, BEFORE loading scans/importing native code.
 
@@ -134,11 +139,20 @@ class RunRepository:
                 raise Conflict('Terminal run is immutable')
             if old[2] and run['status'] not in {'canceling','canceled'}:
                 raise Conflict('Cancellation blocks advancement')
+            if document['patient_ids'] != old[0]['patient_ids'] or document.get('model') != old[0].get('model'):
+                raise Conflict('Selected cohort and pinned model context are immutable')
+            for results in document.get('stage_results',{}).values():
+                identities = [patient['patient_id'] for patient in results]
+                if len(identities) != len(set(identities)) or not set(identities) <= set(document['patient_ids']):
+                    raise Conflict('Stage results must account for distinct selected patients')
             old_events = old[0].get('events',[])
             events = document.get('events',[])
             if events[:len(old_events)] != old_events:
                 raise Conflict('Audit history cannot be rewritten')
-            for event in events[len(old_events):]:
+            for offset,event in enumerate(events[len(old_events):],1):
+                expected = document.get('sequence_base',0) + len(old_events) + offset
+                if event.get('sequence') != expected or event.get('run_id') != run['id'] or event.get('id') != f"{run['id']}:{expected}":
+                    raise Conflict('Audit events must be consecutive and run-owned')
                 conn.execute('INSERT INTO run_events(run_id,sequence,event) VALUES (%s,%s,%s)',(run['id'],event['sequence'],Jsonb(event)))
             conn.execute('UPDATE visitor_runs SET document=%s,revision=revision+1,cancel_intent=cancel_intent OR %s WHERE id=%s', (Jsonb(document),cancel,run['id']))
             if approve:

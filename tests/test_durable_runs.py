@@ -146,6 +146,7 @@ def test_ambiguous_submission_self_registration_and_queued_cancel(client, monkey
     replacement = RunRepository(os.environ['DATABASE_URL'])
     assert replacement.claim(op['id'],'replacement-dispatch') is None
     assert replacement.operation(created['id'])['owner'] == f'provider-call-{owner_index}'
+    assert replacement.submissions(op['id']) == [{'submission_id':'attempt-1','provider_call_id':f'provider-call-{owner_index}','ambiguous':False}]
     assert 'secret' not in replacement.operation_context(op['id'])['run']
     assert client.get(path,headers=auth).json()['status'] == 'running'
     assert client.post(path+'/cancel',headers=auth).status_code == 503
@@ -219,7 +220,6 @@ def test_catalog_reader_cannot_access_durable_controls_and_writer_needs_no_ddl(c
 
 def test_real_s3_artifacts_survive_replacement_with_private_capability_access(client, monkeypatch, tmp_path):
     """Actual S3 HTTP adapter with an explicitly labeled local Moto server."""
-    import base64
     import hashlib
     import socket
     import subprocess
@@ -293,3 +293,31 @@ def test_real_s3_artifacts_survive_replacement_with_private_capability_access(cl
             replacement.terminate(); replacement.wait(timeout=10)
         if moto.poll() is None:
             moto.terminate(); moto.wait(timeout=10)
+
+
+def test_valid_legacy_browser_gate_imports_into_durable_store(client, monkeypatch, tmp_path):
+    import hashlib
+    import hmac
+    from service.run_repository import RunRepository
+    # Simulate a gate saved before durable storage/signature-digest support.
+    monkeypatch.delenv('RUN_DATABASE_URL',raising=False)
+    created = client.post('/runs',json={'patient_ids':['TEST-MISSING']}).json()
+    path = '/runs/'+created['id']
+    auth = {'Authorization':f"Bearer {created['secret']}"}
+    client.get(path+'/events',headers=auth)
+    saved = client.get(path,headers=auth).json()['checkpoint']
+    body = {k:v for k,v in saved.items() if k != 'signature'}
+    saved['signature'] = hmac.new(os.environ['CHECKPOINT_SIGNING_KEY'].encode(),runner.checkpoint_bytes(body)+b'\0'+created['secret'].encode(),hashlib.sha256).hexdigest()
+    runner.runs.clear()
+    runner.launches.clear()
+    RunRepository(os.environ['DATABASE_URL']).initialize()
+    monkeypatch.setenv('RUN_DATABASE_URL',os.environ['DATABASE_URL'])
+    monkeypatch.setenv('LOCAL_ARTIFACT_DIR',str(tmp_path/'objects'))
+    imported = client.post('/runs/restore',json={'checkpoint':saved},headers=auth)
+    assert imported.status_code == 200
+    assert client.get(path,headers=auth).json()['checkpoint'] == saved
+    assert runner.repository().active_owners(created['id']) == []
+    approval = {key:saved[key] for key in ('disclosure_id','model_version')}
+    assert client.post(path+'/approve',json=approval,headers=auth).status_code == 200
+    client.get(path+'/events?after='+str(saved['last_sequence']),headers=auth)
+    assert client.get(path+'/results',headers=auth).json()['status'] == 'completed'

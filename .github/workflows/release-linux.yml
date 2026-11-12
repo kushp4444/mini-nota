@@ -37,10 +37,12 @@ jobs:
         run: |
           docker run --rm --network host --cap-drop ALL \
             --security-opt no-new-privileges \
+            --env DATABASE_URL=postgresql://mini_nota:ci-fixture-only@127.0.0.1:5432/mini_nota \
             --env REQUIRE_STORAGE_FIXTURE=1 --entrypoint sh mini-nota:ci -ec '
               python -m venv --system-site-packages /tmp/storage-fixture
               /tmp/storage-fixture/bin/python -m pip install -r /app/deploy/requirements-storage-fixture.txt
               /tmp/storage-fixture/bin/python -m pytest tests/test_object_storage.py -q -p no:cacheprovider
+              MOTO_SERVER_PYTHON=/tmp/storage-fixture/bin/python python -m pytest tests/test_durable_runs.py -q -p no:cacheprovider
             '
       - name: Report reproducibility contract
         run: |
