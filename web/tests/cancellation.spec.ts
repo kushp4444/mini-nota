@@ -58,7 +58,7 @@ test('confirmation dismisses safely; cancellation retains results and enables a 
   await expect(page.getByText('Canceled by visitor',{exact:false}).first()).toBeVisible();
   await page.getByRole('button',{name:'Patients',exact:true}).click();
   await page.getByRole('button',{name:'Run analysis'}).click();
-  expect(api.launches()).toBe(2);
+  await expect.poll(api.launches).toBe(2);
   await page.getByRole('button',{name:'History',exact:true}).click();
   await expect(page.getByRole('button',{name:/Open run cancel-fixture-1/})).toBeVisible();
 });

@@ -113,3 +113,7 @@ async def run_stage(stage, selection, authorization):
             operation['status'] = 'finished'
         operation['touched'] = time.monotonic()
         operation['finished'].set()
+
+@app.post('/features')
+async def features(selection: Selection, authorization: str = Header(default='')):
+    return await run_stage('features', selection, authorization)

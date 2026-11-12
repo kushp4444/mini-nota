@@ -1,5 +1,6 @@
 "use client";
 import MaskResults, { type MaskPatientResult } from "../components/MaskResults";
+import FeatureResults, { type FeaturePatientResult } from "../components/FeatureResults";
 import { useEffect, useRef, useState } from "react";
 import History from "../components/History";
 import CancelRun from "../components/CancelRun";
@@ -28,6 +29,7 @@ export default function Home() {
     [events, setEvents] = useState<Audit[]>([]),
     [results, setResults] = useState<Result[]>([]),
     [masks, setMasks] = useState<MaskPatientResult[]>([]),
+    [features, setFeatures] = useState<FeaturePatientResult[]>([]),
     [status, setStatus] = useState("idle"),
     [error, setError] = useState(""),
     [history, setHistory] = useState<SavedRun[]>([]),
@@ -99,6 +101,7 @@ export default function Home() {
     setEvents([]);
     setResults([]);
     setMasks([]);
+    setFeatures([]);
     setStatus("running");
     setView("Analysis");
     try {
@@ -141,6 +144,8 @@ export default function Home() {
             if (event.payload.stage === "masks")
               setMasks((prev) => [...prev, event.payload.patient as MaskPatientResult]);
           }
+          if (event.kind === "tool_result" && event.payload.stage === "features" && event.payload.patient)
+            setFeatures((prev) => [...prev, event.payload.patient as FeaturePatientResult]);
           if (event.kind === "done")
             setStatus(event.payload.status || "completed");
         }
@@ -230,7 +235,7 @@ export default function Home() {
                 </h1>
                 <p>
                   {view === "Patients"
-                    ? "Select a cohort to inspect scan quality and tumor masks."
+                    ? "Select a cohort to inspect scan quality, tumor masks and radiomic features."
                     : "An auditable view of your imaging workflow."}
                 </p>
               </div>
@@ -251,7 +256,7 @@ export default function Home() {
               </div>
               <div>
                 <small>Workflow</small>
-                <strong>QC → tumor masks</strong>
+                <strong>QC → masks → features</strong>
               </div>
             </div>
             {browserBusy && !activeRun.current && <p role="status">A run is already active or awaiting approval in this browser. Return to its tab to finish or cancel it.</p>}
@@ -377,7 +382,7 @@ export default function Home() {
                   <div>
                     <small>Selected cohort</small>
                     <strong>
-                      {selection.length} patients · QC and tumor masks
+                      {selection.length} patients · QC, masks and features
                     </strong>
                   </div>
                   <span className={`status ${status}`}>
@@ -472,6 +477,7 @@ export default function Home() {
                   )}
                 </div>
                 <MaskResults selectedIds={selection} results={masks} qcResults={results} />
+                <FeatureResults selectedIds={selection} results={features} qcResults={results} maskResults={masks} />
               </>
             )}
           </section>
@@ -502,6 +508,7 @@ export default function Home() {
               <span>02</span>
               <div><strong>Tumor masks</strong><small>Aligned overlays and physical volumes</small></div>
             </div>
+            <div className="stage-list"><span>03</span><div><strong>Radiomic features</strong><small>Real quantitative measurements</small></div></div>
             <div className="timeline">
               {displayedEvents.length ? (
                 displayedEvents.map((e) => (
