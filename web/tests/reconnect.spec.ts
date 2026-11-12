@@ -100,3 +100,45 @@ test('a slower second tab cannot overwrite the saved terminal timeline with an o
  await page.getByRole('button',{name:/Open run recover/}).click();
  await expect(page.locator('.timeline .event')).toHaveCount(3);
 });
+
+test('a late catalog response preserves the recovered launch selection', async ({context,page}) => {
+ await setup(context);
+ await page.addInitScript(() => localStorage.setItem('mini-nota-active-run',JSON.stringify({nonce:'a'.repeat(32),patientIds:['LUNG1-001'],workerContext:'synthetic-worker'})));
+ let release!:()=>void, releaseCreate!:()=>void;
+ const held=new Promise<void>(resolve=>{release=resolve});
+ const heldCreate=new Promise<void>(resolve=>{releaseCreate=resolve});
+ await page.route('**/api/graphql',async route=>{
+   await held;
+   await route.fulfill({json:{data:{patients:[{id:'LUNG1-001',label:'Synthetic one',fixture:true},{id:'LUNG1-002',label:'Synthetic two',fixture:true}]}}});
+ });
+ await page.route('**/api/runs',async route=>{
+   await heldCreate;
+   await route.fulfill({status:201,json:{id:'recover',secret:'opaque-secret',status:'running'}});
+ });
+ await page.goto('/');
+ await expect(page.getByText('1 patients',{exact:true})).toBeVisible();
+ release();
+ await expect(page.getByText('2',{exact:true})).toBeVisible();
+ await expect(page.getByText('1 patients',{exact:true})).toBeVisible({timeout:1000});
+ releaseCreate();
+});
+
+test('Run waits for saved-history recovery before accepting a new launch',async ({context,page})=>{
+ await setup(context);
+ await page.addInitScript(()=>{
+   const original=IDBObjectStore.prototype.getAll;
+   const state=window as typeof window & {releaseHistory?:()=>void};
+   IDBObjectStore.prototype.getAll=function(...args:Parameters<typeof original>){
+     const request=original.apply(this,args);
+     Object.defineProperty(request,'onsuccess',{set(callback){
+       request.addEventListener('success',event=>{state.releaseHistory=()=>callback.call(request,event)});
+     }});
+     return request;
+   };
+ });
+ await page.goto('/');
+ await expect(page.getByText('1 patients',{exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Run analysis'})).toBeDisabled();
+ await page.evaluate(()=>(window as typeof window & {releaseHistory?:()=>void}).releaseHistory?.());
+ await expect(page.getByRole('button',{name:'Run analysis'})).toBeEnabled();
+});

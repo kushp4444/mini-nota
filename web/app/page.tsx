@@ -39,6 +39,7 @@ export default function Home() {
     [saved, setSaved] = useState(false),
     [unfinished, setUnfinished] = useState<SavedRun>(),
     [browserBusy, setBrowserBusy] = useState(false),
+    [recoveringHistory, setRecoveringHistory] = useState(true),
     [launchPending, setLaunchPending] = useState<PendingLaunch>();
   const connection = useRef<AbortController | undefined>(undefined);
   const activeRun = useRef<SavedRun | undefined>(undefined);
@@ -61,7 +62,8 @@ export default function Home() {
           if (launch) void launchAndFollow(launch);
         }
       })
-      .catch((e) => setStorageError(storageMessage(e)));
+      .catch((e) => setStorageError(storageMessage(e)))
+      .finally(() => setRecoveringHistory(false));
     return () => connection.current?.abort();
   }, []);
   async function persist(run: SavedRun) {
@@ -93,7 +95,7 @@ export default function Home() {
       .then((r) => {
         if (r.errors) throw Error("Catalog unavailable");
         setCatalog(r.data.patients);
-        if (!activeRun.current) setSelection(r.data.patients.map((p: Patient) => p.id));
+        if (!activeRun.current && !browserRun()) setSelection(r.data.patients.map((p: Patient) => p.id));
       })
       .catch(() =>
         setError("The patient catalog is unavailable. Please try again later."),
@@ -140,7 +142,7 @@ export default function Home() {
     }
   }
   async function start() {
-    if (activeRun.current && !terminal(activeRun.current.status)) return;
+    if (recoveringHistory || (activeRun.current && !terminal(activeRun.current.status))) return;
     if (
       !selection.length ||
       selection.some((id) => !catalog.some((p) => p.id === id))
@@ -392,7 +394,7 @@ export default function Home() {
                   <span>{catalog.length} available patients</span>
                   <button
                     className="primary"
-                    disabled={!selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}
+                    disabled={recoveringHistory || !selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}
                     onClick={start}
                   >
                     Run analysis <span>→</span>
@@ -439,7 +441,7 @@ export default function Home() {
                       <button
                         className="primary"
                         onClick={start}
-                        disabled={!selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}
+                        disabled={recoveringHistory || !selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}
                       >
                         Run analysis →
                       </button>
