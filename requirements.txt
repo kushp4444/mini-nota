@@ -13,6 +13,8 @@ matplotlib>=3.7
 Pillow>=9.4
 PyYAML>=6.0
 idc-index
+duckdb>=1.0
+threadpoolctl>=3.0
 # Temporary runner / private engine service
 fastapi>=0.115
 uvicorn>=0.34
