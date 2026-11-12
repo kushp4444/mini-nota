@@ -10,7 +10,7 @@ async function proxy(
     path[0] === "runs" &&
     (path.length === 1 ||
       path.length === 2 ||
-      (path.length === 3 && ["events", "event-page", "cancel"].includes(path[2])) ||
+      (path.length === 3 && ["events", "event-page", "cancel", "approve"].includes(path[2])) ||
       (path.length === 5 && path[2] === "artifacts"))
   ))
     return new Response("Not found", { status: 404 });

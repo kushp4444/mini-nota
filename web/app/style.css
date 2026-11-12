@@ -699,3 +699,6 @@ footer span {
 .score-table { overflow-x: auto; }
 .score-table table { min-width: 600px; }
 .score-table td:first-child { white-space: nowrap; }
+.approval-gate { margin: 20px 0; overflow-x: auto; border-color: #e4b879; }
+.approval-gate > p, .approval-gate > button { margin: 16px 24px; }
+.approval-gate td { white-space: normal; }

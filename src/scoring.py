@@ -4,11 +4,15 @@ import pandas as pd
 from .frozen_model import FrozenModel, ModelError
 
 
-def run_model_tool(stage, rows, model_version, bundle_path, outcomes_path):
+def run_model_tool(stage, rows, model_version, bundle_path, outcomes_path, expected_eligibility=None):
     model = FrozenModel(bundle_path)
     # Validate the exact same input before the approval decision and scoring.
     model.validate(rows,model_version)
     if stage == 'score':
+        if expected_eligibility is not None:
+            current = run_model_tool('eligibility',rows,model_version,bundle_path,outcomes_path)
+            if any(current[key] != expected_eligibility[key] for key in ('scoring_eligible','evaluation_eligible','evaluation_exclusions')):
+                raise ModelError('Eligibility changed after disclosure')
         return {'stage':'score','schema_version':1,'status':'success','patients':model.score(rows,model_version),'errors':[], 'model':model.metadata()}
     if stage != 'eligibility':
         raise ModelError('Unknown model tool')

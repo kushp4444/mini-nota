@@ -65,13 +65,14 @@ async def invoke_model_tool(stage, run, rows):
         response = await client.post(os.environ.get('ENGINE_URL', 'http://127.0.0.1:8001') + '/' + stage,
             headers={'Authorization': f"Bearer {os.environ.get('ENGINE_SECRET', '')}"},
             json={'patient_ids':[r['patient_id'] for r in rows], 'operation_id':run['id'],
-                  'feature_rows':rows, 'model_version':run['model']['model_version']})
+                  'feature_rows':rows, 'model_version':run['model']['model_version'],
+                  'expected_eligibility':run['eligibility'] if stage == 'score' else None})
         response.raise_for_status()
         return response.json()
 
 
 async def execute(run):
-    emit(run, 'plan', f"Check {len(run['patient_ids'])} selected patients with real DICOM QC, construct verified tumor masks, then extract radiomic features and score eligible held-out patients with the frozen model.")
+    emit(run, 'plan', f"Check {len(run['patient_ids'])} selected patients with real DICOM QC, construct verified tumor masks, then extract radiomic features and score eligible held-out patients with the frozen model.", {'model':run['model']})
     try:
         for patient_id in run['patient_ids']:
             emit(run, 'tool_call', f'QC · {patient_id}', {'stage': 'qc', 'patient_id': patient_id})
@@ -136,24 +137,19 @@ async def execute(run):
             if run['status'] != 'running': return
             report.update(prepared)
             report['processing_exclusions'] = failed
+        report = disposition_report(run, report)
         run['eligibility'] = report
         emit(run,'decision',f"{len(rows)} scoring-eligible patients; {len(report['evaluation_eligible'])} evaluation-eligible patients.",
              {'stage':'eligibility','report':report})
-        if failed or report['evaluation_exclusions'] or not rows:
+        if not rows:
             run['status'] = 'failed'
-            reason = ('No patients remain eligible for scoring.' if not rows else
-                      'Scoring stopped before execution: exclusions require approval, which is not connected yet.')
-            emit(run,'done',reason,{'status':'failed','reason':reason,'code':'approval_required' if rows else 'no_scoreable_patients','eligibility':report})
+            reason = 'No patients remain eligible for scoring.'
+            emit(run,'done',reason,{'status':'failed','reason':reason,'code':'no_scoreable_patients','eligibility':report})
             return
-        emit(run,'tool_call',f"Frozen model scoring · {len(rows)} patients",{'stage':'score','model_version':run['model']['model_version']})
-        scored = await invoke_model_tool('score',run,rows)
-        if run['status'] != 'running': return
-        for patient in scored['patients']:
-            run['stage_results']['score'].append(patient)
-            emit(run,'tool_result',f"{patient['patient_id']}: frozen-model risk score ready.",{'stage':'score','patient':patient})
-        run['status'] = 'completed'
-        emit(run,'done',f"All four tools complete: {len(scored['patients'])} selected held-out patients scored with {run['model']['model_version']}.",
-             {'status':'completed','selected':len(run['patient_ids']),'scored':len(scored['patients']),'model_version':run['model']['model_version']})
+        if failed or report['evaluation_exclusions']:
+            disclose(run, rows, report)
+            return
+        await score_run(run, rows)
     except Exception as exc:
         if run['status'] != 'running':
             return
@@ -163,6 +159,111 @@ async def execute(run):
         else:
             emit(run, 'error', 'Imaging or model service unavailable; available patient results retained.', {'code': 'engine_unavailable'})
         emit(run, 'done', 'Run failed.', {'status': 'failed'})
+
+def disposition_report(run, report):
+    """Account for every selected identity before any score is computed."""
+    report = dict(report)
+    scoring = set(report['scoring_eligible'])
+    evaluation = set(report['evaluation_eligible'])
+    processing = {p['patient_id']:p for p in report['processing_exclusions']}
+    exclusions = {p['patient_id']:p for p in report['evaluation_exclusions']}
+    if scoring | set(processing) != set(run['patient_ids']) or scoring & set(processing):
+        raise ValueError('Eligibility did not account for every selected patient')
+    if evaluation | set(exclusions) != scoring or evaluation & set(exclusions):
+        raise ValueError('Outcome join did not account for every scoreable patient')
+    report['dispositions'] = [
+        {'patient_id':pid,'scoring_eligible':pid in scoring,'evaluation_eligible':pid in evaluation,
+         'reasons':processing[pid]['errors'] if pid in processing else ([exclusions[pid]] if pid in exclusions else []),
+         'stage':processing[pid]['stage'] if pid in processing else 'eligibility'} for pid in run['patient_ids']]
+    report['scoring_eligible_count'] = len(scoring)
+    report['evaluation_eligible_count'] = len(evaluation)
+    return report
+
+
+def build_checkpoint(run, rows, report):
+    # Only the numeric model input contract, never artifacts or executable paths.
+    compact = [{'patient_id':row['patient_id'],'values':[row['values'][name] for name in row['feature_schema']]} for row in rows]
+    body = {'version':1,'generation':run.get('gate_generation',0),'run_id':run['id'],'patient_ids':run['patient_ids'],
+            'model_version':run['model']['model_version'],'feature_version':run['model']['feature_version'],
+            'feature_schema':rows[0]['feature_schema'],'feature_rows':compact,'eligibility':report}
+    body['disclosure_id'] = hashlib.sha256(json.dumps(body,sort_keys=True,allow_nan=False,separators=(',',':')).encode()).hexdigest()
+    body['last_sequence'] = len(run['events']) + 1
+    return body
+
+
+def disclose(run, rows, report):
+    run['gate_generation'] = run.get('gate_generation',0) + 1
+    run['eligibility'] = report
+    run['checkpoint'] = build_checkpoint(run, rows, report)
+    run['status'] = 'waiting_approval'
+    emit(run,'gate',f"Approval required: {report['scoring_eligible_count']} scoring-eligible; {report['evaluation_eligible_count']} evaluation-eligible patients. Exclusions are disclosed by patient. Waiting has no deadline.",
+         {'status':'waiting_approval','report':report,'checkpoint':run['checkpoint']})
+
+
+async def score_run(run, rows):
+    try:
+        emit(run,'tool_call',f"Frozen model scoring · {len(rows)} patients",{'stage':'score','model_version':run['model']['model_version']})
+        scored = await invoke_model_tool('score',run,rows)
+        if run['status'] != 'running': return
+        for patient in scored['patients']:
+            run['stage_results']['score'].append(patient)
+            emit(run,'tool_result',f"{patient['patient_id']}: frozen-model risk score ready.",{'stage':'score','patient':patient})
+        run['evaluation'] = scored.get('evaluation')
+        if run['evaluation'] is not None:
+            emit(run,'tool_result','Selected-cohort evaluation prepared.',{'stage':'evaluation','evaluation':run['evaluation']})
+        run['status'] = 'completed'
+        emit(run,'done',f"All four tools complete: {len(scored['patients'])} selected held-out patients scored with {run['model']['model_version']}.",
+             {'status':'completed','selected':len(run['patient_ids']),'scored':len(scored['patients']),'model_version':run['model']['model_version']})
+    except Exception as exc:
+        if run['status'] != 'running': return
+        if isinstance(exc,httpx.HTTPStatusError) and exc.response.status_code == 422 and 'Eligibility changed' in exc.response.text:
+            try:
+                prepared = await invoke_model_tool('eligibility',run,rows)
+                if run['status'] != 'running': return
+                report = disposition_report(run,{**prepared,'processing_exclusions':run['eligibility']['processing_exclusions']})
+                disclose(run,rows,report)
+                return
+            except Exception:
+                pass
+        run['status'] = 'failed'
+        emit(run,'error','Model scoring failed; available results retained.',{'code':'scoring_failed'})
+        emit(run,'done','Run failed.',{'status':'failed','reason':'Model scoring failed.'})
+
+
+class Approval(BaseModel):
+    disclosure_id: str
+    model_version: str
+
+
+@app.post('/runs/{run_id}/approve')
+async def approve_run(run_id: str, approval: Approval, authorization: str = Header(default='')):
+    run = authorized(run_id, authorization)
+    async with run.setdefault('control_lock',asyncio.Lock()):
+        checkpoint = run.get('checkpoint')
+        if not checkpoint or approval.disclosure_id != checkpoint['disclosure_id'] or approval.model_version != checkpoint['model_version']:
+            raise HTTPException(409,'Approval does not match the disclosed cohort and model')
+        if run.get('approved_disclosure') == approval.disclosure_id or run['status'] in ('completed','failed','canceled'):
+            return {'id':run_id,'status':run['status']}
+        if run['status'] != 'waiting_approval':
+            raise HTTPException(409,'Run is not waiting for approval')
+        rows = [{'patient_id':r['patient_id'],'feature_schema':checkpoint['feature_schema'],'feature_version':checkpoint['feature_version'],
+                 'values':dict(zip(checkpoint['feature_schema'],r['values']))} for r in checkpoint['feature_rows']]
+        try:
+            prepared = await invoke_model_tool('eligibility',run,rows)
+        except Exception:
+            raise HTTPException(503,'Cannot verify the disclosed cohort and model; approval remains pending')
+        report = disposition_report(run,{**prepared,'processing_exclusions':run['eligibility']['processing_exclusions']})
+        current = build_checkpoint(run,rows,report)
+        if current['disclosure_id'] != checkpoint['disclosure_id']:
+            disclose(run,rows,report)
+            raise HTTPException(409,'Eligibility changed; review the new disclosure before approving')
+        run['approved_disclosure'] = approval.disclosure_id
+        run['status'] = 'running'
+        emit(run,'decision','Anonymous run approval recorded for the disclosed cohort and frozen model.',
+             {'action':'approve','disclosure_id':approval.disclosure_id,'model_version':approval.model_version,'report':report,'status':'running'})
+        run['task'] = asyncio.create_task(score_run(run,rows))
+        return {'id':run_id,'status':run['status']}
+
 
 @app.get('/runs/launch-context')
 def launch_context():
@@ -207,7 +308,7 @@ async def create_run(selection: Selection):
     if nonce and nonce in launches:
         return await create_run(selection)
     run = {'id': run_id, 'secret': secrets.token_urlsafe(32), 'status': 'running',
-           'patient_ids': ids, 'patients': [], 'model':model, 'eligibility':None, 'stage_results': {'qc': [], 'masks': [], 'features': [], 'score': []}, 'events': [], 'touched': time.monotonic()}
+           'patient_ids': ids, 'patients': [], 'model':model, 'eligibility':None, 'checkpoint':None, 'evaluation':None, 'stage_results': {'qc': [], 'masks': [], 'features': [], 'score': []}, 'events': [], 'touched': time.monotonic()}
     runs[run['id']] = run
     if nonce:
         launches[nonce] = {'id': run['id'], 'patient_ids': list(ids)}
@@ -225,7 +326,7 @@ def authorized(run_id, authorization):
 @app.get('/runs/{run_id}')
 def get_run(run_id: str, authorization: str = Header(default='')):
     run = authorized(run_id, authorization)
-    return {key: run[key] for key in ('id', 'status', 'patient_ids', 'patients', 'stage_results', 'events', 'model', 'eligibility')}
+    return {key: run[key] for key in ('id', 'status', 'patient_ids', 'patients', 'stage_results', 'events', 'model', 'eligibility', 'checkpoint', 'evaluation')}
 
 @app.get('/runs/{run_id}/events')
 async def events(run_id: str, after: int = Query(default=0, ge=0), authorization: str = Header(default='')):
@@ -238,7 +339,7 @@ async def events(run_id: str, after: int = Query(default=0, ge=0), authorization
                 cursor = event['sequence']
             # A producer can finish while an earlier yielded event is in flight.
             # Drain its final batch (including done) before closing the stream.
-            if run['status'] in ('completed', 'failed', 'canceled') and cursor >= len(run['events']):
+            if run['status'] in ('completed', 'failed', 'canceled', 'waiting_approval') and cursor >= len(run['events']):
                 break
             await asyncio.sleep(0.05)
     return StreamingResponse(stream(), media_type='text/event-stream', headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'})
@@ -324,4 +425,4 @@ def run_results(run_id: str, authorization: str = Header(default='')):
     return {'id':run_id,'status':run['status'],'patient_ids':run['patient_ids'],
             'model_version':run['model']['model_version'] if run['model'] else None,
             'scores':[{'patient_id':p['patient_id'],**p['values']} for p in run['stage_results']['score']],
-            'eligibility':run['eligibility']}
+            'eligibility':run['eligibility'],'evaluation':run.get('evaluation')}
