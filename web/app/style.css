@@ -600,3 +600,21 @@ footer span {
     padding: 14px 7px;
   }
 }
+
+.center { min-width: 0; }
+.results { margin-bottom: 20px; }
+.feature-results { overflow: hidden; }
+.feature-scroll { overflow: auto; max-height: 360px; }
+.feature-scroll table { width: max-content; min-width: 100%; }
+.feature-scroll th { position: sticky; top: 0; z-index: 1; }
+.feature-scroll th, .feature-scroll td { white-space: nowrap; width: auto; }
+.feature-scroll th:first-child, .feature-scroll td:first-child { position: sticky; left: 0; background: #fbfcfb; z-index: 2; }
+.feature-scroll tr[aria-selected="true"] td { background: #fff7ef; }
+.patient-link { border: 0; background: none; color: #955a30; font-weight: 600; padding: 0; }
+.feature-detail { padding: 20px 23px; border-top: 1px solid #edf0ee; }
+.feature-detail h3 { font-size: 12px; }
+.feature-detail a { font-size: 11px; color: #955a30; }
+.feature-values { max-height: 320px; overflow: auto; font-size: 11px; }
+.feature-values > div { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid #edf0ee; }
+.feature-values dt { overflow-wrap: anywhere; }
+.feature-values dd { margin: 0; font-variant-numeric: tabular-nums; }

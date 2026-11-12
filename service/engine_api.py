@@ -18,6 +18,10 @@ def qc(selection: Selection, authorization: str = Header(default='')):
 def masks(selection: Selection, authorization: str = Header(default='')):
     return run_stage('masks', selection, authorization)
 
+@app.post('/features')
+def features(selection: Selection, authorization: str = Header(default='')):
+    return run_stage('features', selection, authorization)
+
 def run_stage(stage, selection, authorization):
     secret = os.environ.get('ENGINE_SECRET')
     if not secret or authorization != f'Bearer {secret}':
