@@ -14,6 +14,7 @@ from lifelines.utils import concordance_index
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from .feature_contract import extraction_contract, feature_version
+from .evaluation import risk_context, PERCENTILE_RULE
 
 
 class ModelError(ValueError):
@@ -103,7 +104,7 @@ class FrozenModel:
         return {'model_version':self.version,'feature_version':b['feature_version'], 'feature_schema':b['feature_schema'],
             'development_count':len(b['partition']['development']), 'held_out_count':len(b['partition']['held_out']),
             'partition_sha256':b['provenance']['inputs']['partition.json'], 'reference_count':len(b['reference_scores']),
-            'reference_median':b['reference_median'],'score_definition':b['score_definition'],'evaluation':b['evaluation']}
+            'reference_median':b['reference_median'],'percentile_rule':PERCENTILE_RULE,'reference_cohort':'frozen development cohort','score_definition':b['score_definition'],'evaluation':b['evaluation']}
 
     def validate(self, rows, model_version):
         if model_version != self.version:
@@ -125,6 +126,6 @@ class FrozenModel:
         frame = self.validate(rows,model_version)
         b = self.bundle
         scores = _predict(b['pipeline'],frame)
-        return [{'patient_id':row['patient_id'],'status':'success', 'values':{'risk_score':float(score),
+        return [{'patient_id':row['patient_id'],'status':'success', 'values':{'risk_score':float(score), **risk_context(score,b['reference_scores'],b['reference_median']),
             'model_version':self.version, 'feature_version':b['feature_version'], 'score_definition':b['score_definition']},
             'artifacts':[], 'errors':[]} for row,score in zip(rows,scores)]
