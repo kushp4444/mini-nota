@@ -460,7 +460,8 @@ async def create_run(selection: Selection):
             raise HTTPException(409,str(exc))
         if not created:
             return {'id':run['id'],'secret':run['secret'],'status':run['status']}
-    runs[run['id']] = run
+    if not repo or os.environ.get('EXECUTION_BACKEND','local') == 'local':
+        runs[run['id']] = run
     if nonce and not repo:
         launches[nonce] = {'id': run['id'], 'patient_ids': list(ids)}
     if os.environ.get('EXECUTION_BACKEND','local') == 'local':
@@ -541,7 +542,8 @@ async def restore_run(request: Request, authorization: str = Header(default=''))
         return {'id':existing['id'],'status':existing['status']}
     if repository():
         run, _ = repository().create(run,phase=None)
-    runs[run['id']] = run
+    else:
+        runs[run['id']] = run
     return {'id':run['id'],'status':run['status']}
 
 @app.get('/runs/{run_id}')

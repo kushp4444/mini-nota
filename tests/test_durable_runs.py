@@ -189,16 +189,18 @@ def test_catalog_reader_cannot_access_durable_controls_and_writer_needs_no_ddl(c
     from service.run_repository import RunRepository
     isolated = os.environ['DATABASE_URL']
     RunRepository(isolated).initialize()
+    import secrets
+    role_password = secrets.token_urlsafe(32)
     writer, reader = 'test_writer_'+uuid.uuid4().hex, 'test_reader_'+uuid.uuid4().hex
     with psycopg.connect(isolated) as connection:
         schema = connection.execute('SELECT current_schema()').fetchone()[0]
         for role in (writer,reader):
-            connection.execute(sql.SQL('CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT').format(sql.Identifier(role)))
+            connection.execute(sql.SQL('CREATE ROLE {} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD {}').format(sql.Identifier(role),sql.Literal(role_password)))
             connection.execute(sql.SQL('GRANT USAGE ON SCHEMA {} TO {}').format(sql.Identifier(schema),sql.Identifier(role)))
         connection.execute(sql.SQL('GRANT SELECT ON patient_catalog,model_metadata TO {}').format(sql.Identifier(reader)))
         connection.execute(sql.SQL('GRANT SELECT,INSERT,UPDATE ON visitor_runs,run_events,execution_operations,operation_submissions TO {}').format(sql.Identifier(writer)))
     try:
-        read_url, write_url = make_conninfo(isolated,user=reader), make_conninfo(isolated,user=writer)
+        read_url, write_url = make_conninfo(isolated,user=reader,password=role_password), make_conninfo(isolated,user=writer,password=role_password)
         monkeypatch.setattr(catalog,'DATABASE_URL',read_url)
         monkeypatch.setenv('RUN_DATABASE_URL',write_url)
         monkeypatch.setenv('LOCAL_ARTIFACT_DIR',str(tmp_path/'objects'))
