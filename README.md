@@ -44,6 +44,16 @@ WEB_URL=http://localhost:3000 npx playwright test
 
 API tests isolate their PostgreSQL schemas. Browser tests label synthetic fixtures; workflow/scoring/evaluation checks require the real 82-patient catalog and immutable imaging/model assets. No synthetic result is a full-library performance measurement.
 
+Run the mandatory S3 HTTP fixture suite in a separate environment so Moto's test dependencies do not change the app runtime:
+
+```bash
+.venv/bin/python -m venv --system-site-packages /tmp/mini-nota-storage-fixture
+/tmp/mini-nota-storage-fixture/bin/python -m pip install -r deploy/requirements-storage-fixture.txt
+REQUIRE_STORAGE_FIXTURE=1 /tmp/mini-nota-storage-fixture/bin/python -m pytest tests/test_object_storage.py -q
+```
+
+These are local S3 fixture checks, not actual R2 verification. See [storage handoff](docs/ticket-17-handoff.md) for manifest bootstrap, role-specific credentials and integration requirements.
+
 See [release runbook](deploy/README.md) for the Vercel frontend, read-only database initialization, immutable held-out-only asset manifest, pinned Linux image build, single-owner supervisor, tmpfs cleanup, payload bounds and hosted verification gates. See [release evidence](docs/ticket-15-handoff.md) for measured local execution and precise external blockers. Public deployment and Linux numerical parity require actual target verification before the demo is declared ready.
 
 The original offline CLI (`python -m src.pipeline`) remains available for development; its legacy survival fitting is separate from the hosted frozen-model workflow. Numerical geometry, measurement and survival behavior are documented in `docs/ticket-4-handoff.md` through `docs/ticket-8-handoff.md`.
