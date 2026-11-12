@@ -26,13 +26,26 @@ async function proxy(
       base.replace(/\/$/, "") + "/",
     );
     url.search = new URL(request.url).search;
+    let body: string | undefined;
+    if (request.method === "POST") {
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      if (request.body) {
+        for await (const chunk of request.body) {
+          size += chunk.byteLength;
+          if (size > 4_000_000) return Response.json({detail:"Request exceeds the recovery limit; keep local History and start a new run"}, {status:413});
+          chunks.push(chunk);
+        }
+      }
+      body = Buffer.concat(chunks).toString("utf8");
+    }
     const response = await fetch(url, {
       method: request.method,
       headers: {
         "Content-Type": "application/json",
         Authorization: request.headers.get("Authorization") || "",
       },
-      body: request.method === "POST" ? await request.text() : undefined,
+      body,
       cache: "no-store",
     });
     return new Response(response.body, {

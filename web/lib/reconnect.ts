@@ -3,11 +3,38 @@ function interrupted(run: SavedRun, reason: string): SavedRun {
   return { ...run, status: 'failed', updatedAt: new Date().toISOString(), reason: `${reason} Saved results and artifact bytes are preserved in this browser. Outputs never received here cannot be recovered. Start a new run for interrupted computation.` };
 }
 export async function reconnectRun(initial: SavedRun, receive: (run: SavedRun) => Promise<void>, signal: AbortSignal): Promise<void> {
-  let run = initial, failures = 0;
+  let run = initial, failures = 0, restored = false;
   while (!terminal(run.status) && !signal.aborted) {
     try {
       const response = await fetch(`/api/runs/${encodeURIComponent(run.id)}/event-page?after=${run.lastSequence}&limit=20`, { headers: { Authorization: `Bearer ${run.secret}` }, cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) });
       if (signal.aborted) return;
+      if (response.status === 404 && run.status === 'waiting_approval' && run.checkpoint && !restored) {
+        const checkpoint = run.checkpoint as {run_id:string;last_sequence:number;patient_ids:string[]};
+        // The signed gate belongs to this exact saved prefix. Never fabricate a lost timeline.
+        if (checkpoint.run_id !== run.id || checkpoint.last_sequence !== run.lastSequence ||
+            JSON.stringify(checkpoint.patient_ids) !== JSON.stringify(run.patientIds) ||
+            run.events.length !== run.lastSequence || run.events.some((e,i) => e.run_id !== run.id || e.sequence !== i+1) ||
+            run.events.at(-1)?.kind !== 'gate') {
+          await receive(interrupted(run, 'Saved approval checkpoint or audit prefix is incomplete.'));
+          return;
+        }
+        const body = JSON.stringify({checkpoint:run.checkpoint});
+        if (new TextEncoder().encode(body).byteLength > 4_000_000) {
+          await receive(interrupted(run, 'Saved approval exceeds the recovery request limit.'));
+          return;
+        }
+        const recovery = await fetch('/api/runs/restore', {method:'POST',headers:{Authorization:`Bearer ${run.secret}`,'Content-Type':'application/json'},body,cache:'no-store',signal:AbortSignal.any([signal,AbortSignal.timeout(15000)])});
+        if ([403,409,413,422].includes(recovery.status)) {
+          const detail = await recovery.json().catch(() => ({}));
+          await receive(interrupted(run, typeof detail.detail === 'string' ? detail.detail : 'Saved approval is incompatible or cannot be verified.'));
+          return;
+        }
+        if (!recovery.ok) throw Error(`Approval recovery unavailable (${recovery.status}); the saved gate remains pending`);
+        const result = await recovery.json();
+        if (result.id !== run.id) throw Error('Recovery returned a different run identity');
+        restored = true;
+        continue;
+      }
       if ([403,404].includes(response.status)) {
         await receive(interrupted(run, response.status === 404 ? 'Interrupted: temporary worker state is gone.' : 'Interrupted: the saved run credentials no longer grant access.'));
         return;

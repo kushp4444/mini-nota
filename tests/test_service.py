@@ -72,8 +72,8 @@ def client(tmp_path_factory):
     outcome_rows[outcome_rows.patient_id!='TEST-MISSING'].to_csv(root/'outcomes.csv',index=False)
     with socket.socket() as s:
         s.bind(('127.0.0.1',0)); port = s.getsockname()[1]
-    old = {k: os.environ.get(k) for k in ('ENGINE_SECRET','ENGINE_URL')}
-    os.environ.update(ENGINE_SECRET='test-engine-secret',ENGINE_URL=f'http://127.0.0.1:{port}')
+    old = {k: os.environ.get(k) for k in ('ENGINE_SECRET','ENGINE_URL','CHECKPOINT_SIGNING_KEY')}
+    os.environ.update(ENGINE_SECRET='test-engine-secret',ENGINE_URL=f'http://127.0.0.1:{port}',CHECKPOINT_SIGNING_KEY='test-only-checkpoint-signing-key-'+'x'*48)
     proc = subprocess.Popen([sys.executable,'-m','uvicorn','service.engine_api:app','--port',str(port)],env={**os.environ,'RAW_DIR':str(root),'MODEL_BUNDLE':str(root/'model.json'),'OUTCOMES_CSV':str(root/'outcomes.csv')},stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     try:
         for _ in range(100):
@@ -520,3 +520,56 @@ def test_pending_approval_is_not_expired_by_temporary_terminal_retention(client)
             assert page.json()['status']=='completed'
     finally:
         proc.terminate();proc.wait(timeout=10)
+
+
+def test_saved_gate_restores_after_worker_loss_without_rescoring_or_repeating_audit(client, monkeypatch):
+    """Real imaging fixture; emulate lost volatile runner memory, retain browser data."""
+    from service import app as runner
+    monkeypatch.setenv('CHECKPOINT_SIGNING_KEY', 'test-only-stable-signing-key-' + 'x' * 40)
+    created = client.post('/runs', json={'patient_ids':['TEST-CLEAN','TEST-MISSING']}).json()
+    url = f"/runs/{created['id']}"
+    headers = {'Authorization':f"Bearer {created['secret']}"}
+    client.get(url+'/events',headers=headers)
+    saved = client.get(url,headers=headers).json()
+    checkpoint = saved['checkpoint']
+    runner.runs.pop(created['id'])
+    restored = client.post('/runs/restore',headers=headers,json={'checkpoint':checkpoint})
+    assert restored.status_code == 200, restored.text
+    assert restored.json() == {'id':created['id'],'status':'waiting_approval'}
+    page = client.get(url+f"/event-page?after={checkpoint['last_sequence']}",headers=headers).json()
+    assert page['events'] == [] and page['last_sequence'] == checkpoint['last_sequence']
+    assert client.get(url+'/results',headers=headers).json()['scores'] == []
+    assert client.post('/runs/restore',headers=headers,json={'checkpoint':checkpoint}).json() == restored.json()
+    approved = client.post(url+'/approve',headers=headers,json={'disclosure_id':checkpoint['disclosure_id'],'model_version':checkpoint['model_version']})
+    assert approved.status_code == 200
+    events = client.get(url+f"/events?after={checkpoint['last_sequence']}",headers=headers).text
+    tail = [json.loads(line[6:]) for line in events.splitlines() if line.startswith('data: ')]
+    assert tail[0]['sequence'] == checkpoint['last_sequence'] + 1
+    assert tail[-1]['payload']['status'] == 'completed'
+    assert len([e for e in tail if e['kind']=='tool_call' and e['payload'].get('stage')=='score']) == 1
+    assert len(client.get(url+'/results',headers=headers).json()['scores']) == 2
+    assert client.post('/runs/restore',headers=headers,json={'checkpoint':checkpoint}).json()['status'] == 'completed'
+
+
+def test_restore_rejects_tampered_content_cursor_secret_and_incomplete_data(client, monkeypatch):
+    from service import app as runner
+    monkeypatch.setenv('CHECKPOINT_SIGNING_KEY','test-only-stable-'+'z'*48)
+    created = client.post('/runs',json={'patient_ids':['TEST-CLEAN','TEST-PRIVACY']}).json()
+    url=f"/runs/{created['id']}"
+    headers={'Authorization':f"Bearer {created['secret']}"}
+    client.get(url+'/events',headers=headers)
+    saved=client.get(url,headers=headers).json()['checkpoint']
+    runner.runs.pop(created['id'])
+    for field, value in [('last_sequence',1),('generation',99),('patient_ids',['TEST-CLEAN']),('model_version','other-model'),('feature_rows',[]),('eligibility',{})]:
+        changed={**saved,field:value}
+        response=client.post('/runs/restore',headers=headers,json={'checkpoint':changed})
+        assert response.status_code == 422
+        assert 'start a new run' in response.json()['detail']
+    assert client.post('/runs/restore',headers={'Authorization':'Bearer wrong-secret'},json={'checkpoint':saved}).status_code == 422
+    assert client.post('/runs/restore',json={'checkpoint':saved}).status_code == 422
+    assert client.post('/runs/restore',headers=headers,json={'checkpoint':{}}).status_code == 422
+    assert client.post('/runs/restore',headers=headers,content='x'*4_000_001).status_code == 413
+    # Real browser JSON roundtrip, including integer-valued measurements, not a Python-only serialization.
+    roundtrip=json.loads(subprocess.run(['node','-e','let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.stringify(JSON.parse(s))))'],input=json.dumps(saved),text=True,capture_output=True,check=True).stdout)
+    assert client.post('/runs/restore',headers=headers,json={'checkpoint':roundtrip}).status_code == 200
+    assert client.get(url+'/event-page?after=0',headers=headers).status_code == 409
