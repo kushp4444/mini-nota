@@ -11,8 +11,8 @@ RAW_DIR = DATA_DIR / "raw"            # TCIA download lands here (git-ignored)
 PROCESSED_DIR = DATA_DIR / "processed"
 OUTPUTS_DIR = ROOT / "outputs"
 
-for _d in (RAW_DIR, PROCESSED_DIR, OUTPUTS_DIR):
-    _d.mkdir(parents=True, exist_ok=True)
+# Resolve default paths without writing to the application tree. Stage writers
+# create their own output directories only when an operation requests output.
 
 PYRADIOMICS_CONFIG = ROOT / "pyradiomics_config.yaml"
 
