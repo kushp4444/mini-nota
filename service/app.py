@@ -202,11 +202,12 @@ async def create_run(selection: Selection):
     known = {p['id'] for p in await asyncio.to_thread(patients)}
     if not ids or len(ids) != len(set(ids)) or not set(ids).issubset(known):
         raise HTTPException(422, 'Select one or more distinct patients from the available catalog')
-    # Recheck after the catalog await: concurrent retries create only one task.
+    model = await asyncio.to_thread(model_metadata)
+    # Recheck after all lookups: concurrent retries create only one task.
     if nonce and nonce in launches:
         return await create_run(selection)
     run = {'id': run_id, 'secret': secrets.token_urlsafe(32), 'status': 'running',
-           'patient_ids': ids, 'patients': [], 'model':await asyncio.to_thread(model_metadata), 'eligibility':None, 'stage_results': {'qc': [], 'masks': [], 'features': [], 'score': []}, 'events': [], 'touched': time.monotonic()}
+           'patient_ids': ids, 'patients': [], 'model':model, 'eligibility':None, 'stage_results': {'qc': [], 'masks': [], 'features': [], 'score': []}, 'events': [], 'touched': time.monotonic()}
     runs[run['id']] = run
     if nonce:
         launches[nonce] = {'id': run['id'], 'patient_ids': list(ids)}

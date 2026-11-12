@@ -57,3 +57,9 @@ Observed TDD red states included absent model/scoring-tool modules, the clean AP
 - Real browser patient **LUNG1-002** completed the full live pipeline in **10.041 seconds**, produced risk score **0.31620669544422614**, retained three artifacts (overlay plus JSON/CSV features), verified authorized GraphQL values and rejected unauthenticated result access, then retained results across History/reload. Receipt `/private/tmp/mini-nota-implementation/ticket7-live-receipt.json`, visually inspected screenshot `ticket7-live-scoring.png`, isolated service/browser harness `verify-ticket7-live.py` in that same directory. Only owned test ports 3070/8070/8071 were used and stopped.
 
 No held-out performance evaluation, accuracy claim, hosted deployment, raw-data commit, or visitor-server persistence is included.
+
+## Integration verification
+
+Merged into `codex/mini-nota-mvp` at `352f60e`. The integrated production build/TypeScript and all 25 browser checks passed, including real LUNG1-002 scoring (0.31620669544422614), authorized GraphQL results, three locally retained artifacts, and History reload. The real catalog still exactly matches all 82 frozen held-out IDs, and every batch score equals its individual score exactly.
+
+Integration review found that the new asynchronous metadata lookup followed #12's final launch-nonce check, reopening concurrent retry duplication. A public API regression reproduced eight different secrets for one nonce. Metadata now loads before the final check, so publishing the run and launch receipt remains atomic within the event loop. The complete pre-fix Python suite passed 40 tests; all 15 API tests passed after the correction, including the additional concurrent-retry regression.

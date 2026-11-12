@@ -303,6 +303,33 @@ def test_launch_nonce_recovers_same_run_after_lost_response_and_rejects_reuse(cl
     assert lost_worker.json()['detail']['code'] == 'launch_interrupted'
 
 
+def test_concurrent_launch_retries_recover_one_run_and_secret(client):
+    import secrets
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    context = client.get('/runs/launch-context').json()
+    request = {'patient_ids':['TEST-CLEAN'], 'launch_nonce':secrets.token_urlsafe(32),
+               'worker_context':context['worker_context']}
+    barrier = threading.Barrier(8)
+
+    def retry(_):
+        barrier.wait(timeout=10)
+        response = client.post('/runs',json=request)
+        assert response.status_code == 201
+        return response.json()
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        responses = list(pool.map(retry, range(8)))
+    try:
+        assert len({(r['id'],r['secret']) for r in responses}) == 1
+        first = responses[0]
+        assert client.get(f"/runs/{first['id']}",headers={'Authorization':f"Bearer {first['secret']}"}).status_code == 200
+    finally:
+        # Stop any live work using the last recoverable credential even on red.
+        recovered = client.post('/runs',json=request).json()
+        client.post(f"/runs/{recovered['id']}/cancel",headers={'Authorization':f"Bearer {recovered['secret']}"})
+
+
 def test_expired_launch_nonce_never_silently_restarts_computation(client):
     import secrets
     # Separate runner with short temporary retention; test only public HTTP APIs.
