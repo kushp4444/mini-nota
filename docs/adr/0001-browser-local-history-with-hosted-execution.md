@@ -1,5 +1,7 @@
 # Browser-local history with hosted execution
 
+The server-persistence restriction in this decision is superseded by [ADR 0003](0003-modal-compute-with-durable-results.md), following the user's Render/Neon/R2/Modal hosting decision. The browser History, anonymous run control, approval and cancellation requirements remain in force.
+
 Mini-Nota is a hosted recruiting demo that visitors can use without installation or authentication. Run history and completed results are persisted in browser storage; there is no server-side persistence of runs, events, or generated artifacts, and no user sessions are tracked. This trades account-based recovery and cross-device history for a low-friction demo: if local history is lost, the visitor starts a new run.
 
 The browser retains a per-run secret for reconnecting and approving, without identifying a user or session. Approval has no time limit. Each browser may have only one run in progress, and the user can cancel it; one visitor's unanswered approval must not block other visitors.
