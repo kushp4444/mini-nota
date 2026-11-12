@@ -1,21 +1,23 @@
 "use client";
-import { useEffect, useState } from "react";
 import MaskResults, { type MaskPatientResult } from "../components/MaskResults";
+import { useEffect, useRef, useState } from "react";
+import History from "../components/History";
+import {
+  Audit,
+  SavedRun,
+  captureEvent,
+  createSavedRun,
+  readRuns,
+  saveRun,
+  storageMessage,
+  terminal,
+} from "../lib/history";
 type Patient = { id: string; label: string; fixture: boolean };
 type Result = {
   patient_id: string;
   status: string;
   values: Record<string, { passed: boolean; detail: string }>;
   errors: { message: string }[];
-};
-type Audit = {
-  id: string;
-  run_id: string;
-  sequence: number;
-  timestamp: string;
-  kind: string;
-  message: string;
-  payload: { patient?: MaskPatientResult; status?: string; stage?: string };
 };
 export default function Home() {
   const [view, setView] = useState("Patients"),
@@ -25,7 +27,36 @@ export default function Home() {
     [results, setResults] = useState<Result[]>([]),
     [masks, setMasks] = useState<MaskPatientResult[]>([]),
     [status, setStatus] = useState("idle"),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [history, setHistory] = useState<SavedRun[]>([]),
+    [savedSelection, setSavedSelection] = useState<SavedRun>(),
+    [storageError, setStorageError] = useState(""),
+    [saved, setSaved] = useState(false),
+    [unfinished, setUnfinished] = useState<SavedRun>();
+  const activeRun = useRef<SavedRun | undefined>(undefined);
+  useEffect(() => {
+    readRuns()
+      .then((runs) => {
+        setHistory(runs.filter((run) => terminal(run.status)));
+        setUnfinished(runs.find((run) => !terminal(run.status)));
+      })
+      .catch((e) => setStorageError(storageMessage(e)));
+  }, []);
+  async function persist(run: SavedRun) {
+    activeRun.current = run;
+    setSaved(false);
+    try {
+      await saveRun(run);
+      setSaved(true);
+      setStorageError("");
+      if (terminal(run.status))
+        setHistory((prev) => [run, ...prev.filter((r) => r.id !== run.id)]);
+    } catch (e) {
+      setStorageError(storageMessage(e));
+    }
+  }
+  const displayedEvents =
+    view === "History" ? savedSelection?.events || [] : events;
   useEffect(() => {
     fetch("/api/graphql", {
       method: "POST",
@@ -51,6 +82,8 @@ export default function Home() {
       return;
     }
     setError("");
+    setSaved(false);
+    activeRun.current = undefined;
     setEvents([]);
     setResults([]);
     setMasks([]);
@@ -64,6 +97,7 @@ export default function Home() {
       });
       const run = await created.json();
       if (!created.ok) throw Error(run.detail || "Unable to start run");
+      await persist(createSavedRun(run, selection));
       const response = await fetch(`/api/runs/${run.id}/events`, {
         headers: { Authorization: `Bearer ${run.secret}` },
       });
@@ -86,11 +120,13 @@ export default function Home() {
           setEvents((prev) =>
             prev.some((e) => e.id === event.id) ? prev : [...prev, event],
           );
+          if (activeRun.current)
+            await persist(await captureEvent(activeRun.current, event));
           if (event.kind === "tool_result" && event.payload.patient) {
             if (event.payload.stage === "qc")
               setResults((prev) => [...prev, event.payload.patient as Result]);
             if (event.payload.stage === "masks")
-              setMasks((prev) => [...prev, event.payload.patient!]);
+              setMasks((prev) => [...prev, event.payload.patient as MaskPatientResult]);
           }
           if (event.kind === "done")
             setStatus(event.payload.status || "completed");
@@ -98,7 +134,11 @@ export default function Home() {
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Run unavailable");
-      setStatus("failed");
+      // A broken connection is not proof that server computation failed.
+      const current = activeRun.current as SavedRun | undefined;
+      setStatus(
+        current && !terminal(current.status) ? "interrupted" : "failed",
+      );
     }
   }
   return (
@@ -124,7 +164,7 @@ export default function Home() {
             className={view === name ? "active" : ""}
             onClick={() => setView(name)}
           >
-            <span>{icon}</span>
+            <span aria-hidden="true">{icon}</span>
             {name}
           </button>
         ))}
@@ -189,16 +229,42 @@ export default function Home() {
                 {error}
               </div>
             )}
-            {view === "History" ? (
-              <div className="card empty">
-                <div className="empty-icon">◷</div>
-                <h2>Browser-local history</h2>
-                <p>
-                  History persistence is coming in the next workflow slice.
-                  <br />
-                  This slice retains results only while this page is open.
-                </p>
+            {storageError && (
+              <div role="alert" className="error">
+                {storageError}
               </div>
+            )}
+            {view !== "History" && unfinished && (
+              <div role="status" className="card recovery-note">
+                An unfinished run ({unfinished.id}) was saved locally with{" "}
+                {unfinished.events.length} audit events. Reconnection is not
+                available in this slice. Closing this page did not cancel server
+                work; results never received here may be lost.
+              </div>
+            )}
+            {view !== "History" &&
+              saved &&
+              terminal(status) &&
+              !storageError && (
+                <p role="status" className="persistence-status">
+                  Saved in this browser
+                </p>
+              )}
+            {view !== "History" &&
+              activeRun.current?.artifacts.some(
+                (artifact) => artifact.error,
+              ) && (
+                <p role="alert" className="error">
+                  Some artifacts could not be saved. Open History for the
+                  available results and named missing-artifact reasons.
+                </p>
+              )}
+            {view === "History" ? (
+              <History
+                runs={history}
+                selected={savedSelection}
+                onSelect={setSavedSelection}
+              />
             ) : view === "Patients" ? (
               <div className="card">
                 <div className="card-heading">
@@ -405,8 +471,8 @@ export default function Home() {
               <div><strong>Tumor masks</strong><small>Aligned overlays and physical volumes</small></div>
             </div>
             <div className="timeline">
-              {events.length ? (
-                events.map((e) => (
+              {displayedEvents.length ? (
+                displayedEvents.map((e) => (
                   <div key={e.id} className={`event ${e.kind}`}>
                     <span className="event-dot" />
                     <div>
@@ -415,6 +481,9 @@ export default function Home() {
                         {e.kind.replace("_", " ")}
                       </small>
                       <p>{e.message}</p>
+                      {view === "History" && (
+                        <small>{new Date(e.timestamp).toLocaleString()}</small>
+                      )}
                     </div>
                   </div>
                 ))
