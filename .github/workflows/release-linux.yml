@@ -37,7 +37,7 @@ jobs:
         run: |
           docker run --rm --network host --cap-drop ALL \
             --security-opt no-new-privileges \
-            --env REQUIRE_STORAGE_FIXTURE=1 --entrypoint sh mini-nota:ci -ec '
+            --env REQUIRE_STORAGE_FIXTURE=1 --env TMPDIR=/tmp --entrypoint sh mini-nota:ci -ec '
               python -m venv --system-site-packages /tmp/storage-fixture
               /tmp/storage-fixture/bin/python -m pip install -r /app/deploy/requirements-storage-fixture.txt
               /tmp/storage-fixture/bin/python -m pytest tests/test_object_storage.py -q -p no:cacheprovider
