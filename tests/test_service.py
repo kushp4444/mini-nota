@@ -208,3 +208,14 @@ def test_features_are_progressive_portable_and_retain_partial_failures(client):
     assert any(e['kind']=='error' and e['payload'].get('stage')=='features' and e['payload']['patient_id']=='TEST-CONSTANT' for e in result['events'])
     assert 'Frozen-model scoring is not yet connected' in result['events'][-1]['message']
     assert 'NaN' not in response.text
+
+
+def test_cancellation_after_completion_keeps_original_terminal_result(client):
+    run = client.post('/runs', json={'patient_ids': ['TEST-CLEAN']}).json()
+    headers = {'Authorization': f"Bearer {run['secret']}"}
+    url = f"/runs/{run['id']}"
+    client.get(url + '/events', headers=headers)
+    before = client.get(url, headers=headers).json()
+    assert before['status'] == 'completed'
+    assert client.post(url + '/cancel', headers=headers).json()['status'] == 'completed'
+    assert client.get(url, headers=headers).json() == before

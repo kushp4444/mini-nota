@@ -62,3 +62,20 @@ test('confirmation dismisses safely; cancellation retains results and enables a 
   await page.getByRole('button',{name:'History',exact:true}).click();
   await expect(page.getByRole('button',{name:/Open run cancel-fixture-1/})).toBeVisible();
 });
+
+test('simultaneous starts from two tabs create only one run and reload keeps the lock', async ({context,page}) => {
+  const api = await fixture(context);
+  const other = await context.newPage();
+  await Promise.all([page.goto('/'), other.goto('/')]);
+  await expect(page.getByRole('button',{name:'Run analysis'})).toBeEnabled();
+  await expect(other.getByRole('button',{name:'Run analysis'})).toBeEnabled();
+  await Promise.all([
+    page.getByRole('button',{name:'Run analysis'}).click({force:true}),
+    other.getByRole('button',{name:'Run analysis'}).click({force:true}),
+  ]);
+  await expect.poll(api.launches).toBe(1);
+  await page.reload();
+  await page.getByRole('button',{name:'Patients',exact:true}).click();
+  await expect(page.getByRole('button',{name:'Run analysis'})).toBeDisabled();
+  expect(api.launches()).toBe(1);
+});

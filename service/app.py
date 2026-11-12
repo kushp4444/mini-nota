@@ -27,7 +27,7 @@ async def lifespan(app):
         while True:
             await asyncio.sleep(60)
             for key, run in list(runs.items()):
-                if run['status'] != 'running' and time.monotonic() - run['touched'] > RETENTION_SECONDS:
+                if run['status'] in ('completed', 'failed', 'canceled') and time.monotonic() - run['touched'] > RETENTION_SECONDS:
                     del runs[key]
     task = asyncio.create_task(cleanup())
     yield
@@ -153,7 +153,7 @@ async def events(run_id: str, after: int = Query(default=0, ge=0), authorization
                 cursor = event['sequence']
             # A producer can finish while an earlier yielded event is in flight.
             # Drain its final batch (including done) before closing the stream.
-            if run['status'] != 'running' and cursor >= len(run['events']):
+            if run['status'] in ('completed', 'failed', 'canceled') and cursor >= len(run['events']):
                 break
             await asyncio.sleep(0.05)
     return StreamingResponse(stream(), media_type='text/event-stream', headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'})
