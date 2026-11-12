@@ -23,6 +23,7 @@ export type SavedRun = {
   version: 1;
   id: string;
   secret: string;
+  launchNonce?: string;
   patientIds: string[];
   createdAt: string;
   updatedAt: string;
@@ -132,7 +133,7 @@ export async function captureEvent(
   run: SavedRun,
   event: Audit,
 ): Promise<SavedRun> {
-  if (run.events.some((e) => e.id === event.id)) return run;
+  if (terminal(run.status) || run.events.some((e) => e.id === event.id)) return run;
   const artifacts: SavedArtifact[] = [];
   const stage = event.payload.stage || "unknown";
   const patient = event.payload.patient;

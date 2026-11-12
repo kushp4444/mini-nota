@@ -120,6 +120,68 @@ def test_masks_follow_qc_and_keep_portable_overlay_bytes_and_named_failures(clie
     assert [e['patient_id'] for e in calls] == ['TEST-NO-MASK','TEST-CLEAN']
     assert any(e['kind']=='error' and e['payload'].get('stage')=='masks' and e['payload']['patient_id']=='TEST-NO-MASK' for e in result['events'])
 
+def test_cancel_is_private_idempotent_and_terminal(client):
+    run = client.post('/runs', json={'patient_ids': ['TEST-CLEAN']}).json()
+    url = f"/runs/{run['id']}"
+    headers = {'Authorization': f"Bearer {run['secret']}"}
+    assert client.post(url + '/cancel').status_code == 403
+    canceled = client.post(url + '/cancel', headers=headers)
+    assert canceled.status_code == 200
+    assert canceled.json()['status'] == 'canceled'
+    assert client.post(url + '/cancel', headers=headers).json()['status'] == 'canceled'
+    time.sleep(.2)
+    snapshot = client.get(url, headers=headers).json()
+    assert snapshot['status'] == 'canceled'
+    assert [e['payload']['status'] for e in snapshot['events'] if e['kind'] == 'done'] == ['canceled']
+
+
+def test_cancel_stops_active_process_and_late_retry_cannot_restart_it(client, tmp_path, monkeypatch):
+    """Only the external numerical executable is replaced with a labeled slow fixture."""
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        port = sock.getsockname()[1]
+    engine_url = f'http://127.0.0.1:{port}'
+    env = {**os.environ, 'RAW_DIR': str(tmp_path), 'ENGINE_WORKER_MODULE': 'slow_engine_fixture', 'SLOW_ENGINE_STAGE': 'masks',
+           'PYTHONPATH': str(Path(__file__).parent)}
+    process = subprocess.Popen([sys.executable, '-m', 'uvicorn', 'service.engine_api:app', '--port', str(port)],
+                               env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(100):
+            try:
+                httpx.get(engine_url + '/health', timeout=.2)
+                break
+            except httpx.ConnectError:
+                time.sleep(.05)
+        monkeypatch.setenv('ENGINE_URL', engine_url)
+        run = client.post('/runs', json={'patient_ids': ['TEST-CLEAN']}).json()
+        url = f"/runs/{run['id']}"
+        headers = {'Authorization': f"Bearer {run['secret']}"}
+        for _ in range(100):
+            if (tmp_path / 'started.json').exists():
+                break
+            time.sleep(.02)
+        started = json.loads((tmp_path / 'started.json').read_text())
+        assert client.get(url, headers=headers).json()['status'] == 'running'
+        canceled = client.post(url + '/cancel', headers=headers)
+        assert canceled.status_code == 200 and canceled.json()['status'] == 'canceled'
+        with pytest.raises(ProcessLookupError):
+            os.kill(started['pid'], 0)
+        assert not Path(started['workspace']).exists()
+        private_headers = {'Authorization': 'Bearer test-engine-secret'}
+        retry = httpx.post(engine_url + '/qc', json={'patient_ids': ['TEST-CLEAN'], 'operation_id': run['id']}, headers=private_headers)
+        assert retry.status_code == 409
+        assert client.post(url + '/cancel', headers=headers).json()['status'] == 'canceled'
+        time.sleep(3.1)
+        assert not (tmp_path / 'finished').exists()
+        snapshot = client.get(url, headers=headers).json()
+        assert snapshot['status'] == 'canceled'
+        assert len([e for e in snapshot['events'] if e['kind'] == 'done']) == 1
+        assert [e['payload']['stage'] for e in snapshot['events'] if e['kind'] == 'tool_result'] == ['qc']
+        assert len(snapshot['stage_results']['qc']) == 1
+        assert snapshot['stage_results']['masks'] == []
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
 
 def test_reconnect_pages_drain_completed_run_without_snapshot_or_gaps(client):
     run = client.post('/runs', json={'patient_ids':['TEST-CLEAN']}).json()
@@ -178,3 +240,58 @@ def test_features_are_progressive_portable_and_retain_partial_failures(client):
     assert any(e['kind']=='error' and e['payload'].get('stage')=='features' and e['payload']['patient_id']=='TEST-CONSTANT' for e in result['events'])
     assert 'Frozen-model scoring is not yet connected' in result['events'][-1]['message']
     assert 'NaN' not in response.text
+
+
+def test_cancellation_after_completion_keeps_original_terminal_result(client):
+    run = client.post('/runs', json={'patient_ids': ['TEST-CLEAN']}).json()
+    headers = {'Authorization': f"Bearer {run['secret']}"}
+    url = f"/runs/{run['id']}"
+    client.get(url + '/events', headers=headers)
+    before = client.get(url, headers=headers).json()
+    assert before['status'] == 'completed'
+    assert client.post(url + '/cancel', headers=headers).json()['status'] == 'completed'
+    assert client.get(url, headers=headers).json() == before
+
+
+def test_launch_nonce_recovers_same_run_after_lost_response_and_rejects_reuse(client):
+    import secrets
+    context = client.get('/runs/launch-context').json()
+    request = {'patient_ids':['TEST-CLEAN'], 'launch_nonce': secrets.token_urlsafe(32), 'worker_context': context['worker_context']}
+    first = client.post('/runs',json=request)
+    assert first.status_code == 201
+    replay = client.post('/runs',json=request)
+    assert replay.status_code == 201 and replay.json()['id'] == first.json()['id']
+    assert replay.json()['secret'] == first.json()['secret']
+    assert client.post('/runs',json={**request,'patient_ids':['TEST-NO-MASK']}).status_code == 409
+    lost_worker = client.post('/runs',json={**request,'worker_context':'previous-worker'})
+    assert lost_worker.status_code == 409
+    assert lost_worker.json()['detail']['code'] == 'launch_interrupted'
+
+
+def test_expired_launch_nonce_never_silently_restarts_computation(client):
+    import secrets
+    # Separate runner with short temporary retention; test only public HTTP APIs.
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1',0)); port = sock.getsockname()[1]
+    proc = subprocess.Popen([sys.executable,'-m','uvicorn','service.app:app','--port',str(port)],
+        env={**os.environ,'RUN_RETENTION_SECONDS':'.1','RUN_CLEANUP_INTERVAL':'.05'},
+        stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    try:
+        with httpx.Client(base_url=f'http://127.0.0.1:{port}', timeout=10) as api:
+            for _ in range(100):
+                try:
+                    context = api.get('/runs/launch-context').json(); break
+                except httpx.ConnectError: time.sleep(.05)
+            request = {'patient_ids':['TEST-CLEAN'],'launch_nonce':secrets.token_urlsafe(32),'worker_context':context['worker_context']}
+            created = api.post('/runs',json=request).json()
+            headers = {'Authorization':f"Bearer {created['secret']}"}
+            for _ in range(400):
+                page = api.get(f"/runs/{created['id']}/event-page",headers=headers)
+                if page.status_code == 404: break
+                time.sleep(.05)
+            assert page.status_code == 404
+            retry = api.post('/runs',json=request)
+            assert retry.status_code == 409
+            assert retry.json()['detail']['code'] == 'launch_interrupted'
+    finally:
+        proc.terminate();proc.wait(timeout=10)

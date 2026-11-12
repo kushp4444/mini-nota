@@ -3,7 +3,10 @@ import MaskResults, { type MaskPatientResult } from "../components/MaskResults";
 import FeatureResults, { type FeaturePatientResult } from "../components/FeatureResults";
 import { useEffect, useRef, useState } from "react";
 import History from "../components/History";
+import { recoverLaunch, StoppedLaunch } from "../lib/launch";
 import { reconnectRun } from "../lib/reconnect";
+import CancelRun from "../components/CancelRun";
+import { browserRun, watchBrowserRun, reserveBrowserRun, attachBrowserRun, releaseBrowserRun, pendingLaunch, reclaimBrowserRun, type PendingLaunch } from "../lib/browser-run";
 import {
   Audit,
   SavedRun,
@@ -34,9 +37,15 @@ export default function Home() {
     [savedSelection, setSavedSelection] = useState<SavedRun>(),
     [storageError, setStorageError] = useState(""),
     [saved, setSaved] = useState(false),
-    [unfinished, setUnfinished] = useState<SavedRun>();
+    [unfinished, setUnfinished] = useState<SavedRun>(),
+    [browserBusy, setBrowserBusy] = useState(false),
+    [launchPending, setLaunchPending] = useState<PendingLaunch>();
   const connection = useRef<AbortController | undefined>(undefined);
   const activeRun = useRef<SavedRun | undefined>(undefined);
+  useEffect(() => watchBrowserRun(() => {
+    try { setBrowserBusy(Boolean(browserRun())); }
+    catch { setBrowserBusy(true); setError('Browser storage is unavailable; runs cannot be safely coordinated across tabs.'); }
+  }), []);
   useEffect(() => {
     readRuns()
       .then((runs) => {
@@ -47,16 +56,23 @@ export default function Home() {
           setSelection(pending.patientIds);
           setView("Analysis");
           void follow(pending);
+        } else {
+          const launch = pendingLaunch();
+          if (launch) void launchAndFollow(launch);
         }
       })
       .catch((e) => setStorageError(storageMessage(e)));
     return () => connection.current?.abort();
   }, []);
   async function persist(run: SavedRun) {
+    if (activeRun.current?.id === run.id && terminal(activeRun.current.status) && !terminal(run.status)) return;
     activeRun.current = run;
+    if (terminal(run.status)) { releaseBrowserRun(run.id); if (run.launchNonce) releaseBrowserRun(run.launchNonce); }
     setSaved(false);
     try {
       await saveRun(run);
+      if (run.launchNonce) attachBrowserRun(run.launchNonce, run.id);
+      if (terminal(run.status)) releaseBrowserRun(run.id);
       setSaved(true);
       setStorageError("");
       if (terminal(run.status))
@@ -106,6 +122,7 @@ export default function Home() {
     const controller = new AbortController();
     connection.current = controller;
     activeRun.current = run;
+    await reclaimBrowserRun(run.id);
     await displayRun(run);
     try {
       await reconnectRun(run, async next => {
@@ -131,6 +148,9 @@ export default function Home() {
       setError("Select at least one available patient.");
       return;
     }
+    let reservation: string;
+    try { reservation = await reserveBrowserRun(selection); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Unable to coordinate runs in this browser.'); return; }
     setError("");
     setSaved(false);
     activeRun.current = undefined;
@@ -140,24 +160,40 @@ export default function Home() {
     setFeatures([]);
     setStatus("running");
     setView("Analysis");
+    await launchAndFollow({nonce:reservation,patientIds:selection});
+  }
+  async function launchAndFollow(launch: PendingLaunch) {
+    setLaunchPending(launch);
+    setView("Analysis");
+    setSelection(launch.patientIds);
+    setStatus("connecting");
+    setError("");
     try {
-      const created = await fetch("/api/runs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ patient_ids: selection }),
-      });
-      const run = await created.json();
-      if (!created.ok) throw Error(run.detail || "Unable to start run");
-      await persist(createSavedRun(run, selection));
-      await follow(activeRun.current!);
+      const run = await recoverLaunch(pendingLaunch() || launch);
+      const savedRun = {...createSavedRun({...run, status:"running"}, launch.patientIds), launchNonce:launch.nonce};
+      await persist(savedRun);
+      setLaunchPending(undefined);
+      await follow(savedRun);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Run unavailable");
-      // A broken connection is not proof that server computation failed.
-      const current = activeRun.current as SavedRun | undefined;
-      setStatus(
-        current && !terminal(current.status) ? "interrupted" : "failed",
-      );
+      if (e instanceof StoppedLaunch) {
+        releaseBrowserRun(launch.nonce);
+        setLaunchPending(undefined);
+        const failed = {...createSavedRun({id:`launch-${launch.nonce}`,secret:"",status:"failed"},launch.patientIds), reason:e.message};
+        await persist(failed);
+        setStatus("failed");
+      } else setStatus("disconnected");
+      setError(e instanceof Error ? e.message : "Launch recovery unavailable");
     }
+  }
+
+  async function cancelCurrent() {
+    const run = activeRun.current;
+    if (!run || terminal(run.status)) return;
+    const headers = { Authorization: `Bearer ${run.secret}` };
+    const response = await fetch(`/api/runs/${run.id}/cancel`, { method: 'POST', headers });
+    if (!response.ok) throw Error('Cancellation was not confirmed. Please retry; processing may still be active.');
+    connection.current?.abort();
+    await follow(activeRun.current || run);
   }
   return (
     <div className="shell">
@@ -242,6 +278,8 @@ export default function Home() {
                 <strong>QC → masks → features</strong>
               </div>
             </div>
+            {browserBusy && !activeRun.current && <p role="status">A run is already active or awaiting approval in this browser. Return to its tab to finish or cancel it.</p>}
+            {activeRun.current && !terminal(activeRun.current.status) && <CancelRun onConfirm={cancelCurrent} />}
             {error && (
               <div role="alert" className="error">
                 {error}
@@ -252,6 +290,10 @@ export default function Home() {
                 {storageError}
               </div>
             )}
+            {view !== "History" && launchPending && <div role="status" className="card recovery-note">
+              Recovering a pending launch. The saved request identifies the same run; server work has not been canceled.
+              {status === "disconnected" && <button onClick={() => launchAndFollow(pendingLaunch() || launchPending)}>Retry launch recovery</button>}
+            </div>}
             {view !== "History" && unfinished && (
               <div role="status" className="card recovery-note">
                 Reconnecting saved run ({unfinished.id}) from event {unfinished.lastSequence}.
@@ -348,7 +390,7 @@ export default function Home() {
                   <span>{catalog.length} available patients</span>
                   <button
                     className="primary"
-                    disabled={!selection.length || Boolean(activeRun.current && !terminal(activeRun.current.status))}
+                    disabled={!selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}
                     onClick={start}
                   >
                     Run analysis <span>→</span>
@@ -395,7 +437,7 @@ export default function Home() {
                       <button
                         className="primary"
                         onClick={start}
-                        disabled={!selection.length || Boolean(activeRun.current && !terminal(activeRun.current.status))}
+                        disabled={!selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}
                       >
                         Run analysis →
                       </button>

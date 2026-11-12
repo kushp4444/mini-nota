@@ -690,3 +690,7 @@ footer span {
   color: #735a24;
   background: #fff3d7;
 }
+.cancel-backdrop { position:fixed; inset:0; z-index:20; background:#17223080; display:grid; place-items:center; }
+.cancel-dialog { max-width:480px; margin:24px; padding:28px; }
+.cancel-dialog p { margin:16px 0; line-height:1.5; }
+.cancel-dialog button { margin-right:12px; }

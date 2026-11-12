@@ -26,6 +26,7 @@ async function fixture(page: Page, status = "completed") {
       },
     }),
   );
+  await page.route("**/api/runs/launch-context", r => r.fulfill({json:{worker_context:"synthetic-worker"}}));
   let count = 0;
   await page.route("**/api/runs", (route) =>
     fulfill(route, {

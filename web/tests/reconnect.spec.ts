@@ -10,6 +10,7 @@ async function setup(context: BrowserContext) {
     { kind: 'done', message: 'Synthetic completed', payload: {status:'completed'} },
   ].map((e,i) => ({...e,id:`recover:${i+1}`,run_id:'recover',sequence:i+1,timestamp:'2026-11-11T12:00:00Z'}));
   await context.route('**/api/graphql', r => r.fulfill({json:{data:{patients:[{id:'LUNG1-001', label:'Synthetic fixture',fixture:true}]}}}));
+  await context.route("**/api/runs/launch-context", r => r.fulfill({json:{worker_context:"synthetic-worker"}}));
   await context.route('**/api/runs',r => r.fulfill({status:201,json:{id:'recover',secret:'opaque-secret',status:'running'}}));
   await context.route('**/api/runs/recover/event-page?*',r => {
     expect(r.request().headers()['authorization']).toBe('Bearer opaque-secret');
