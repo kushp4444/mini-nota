@@ -10,6 +10,7 @@ import secrets
 import time
 import uuid
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 
 import httpx
@@ -18,6 +19,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from .catalog import patients, model_metadata
 from .run_repository import RunRepository, Conflict
+
+tool_transport = ContextVar("tool_transport", default=None)
 
 runs = {}
 launches = {}
@@ -33,6 +36,23 @@ def repository():
         repo = RunRepository(url)
         _repositories[url] = repo
     return _repositories[url]
+
+def execution_provider():
+    from .execution import ModalProvider
+    return ModalProvider()
+
+async def reconcile_remote(run_id=None, *, locked=False):
+    if os.environ.get('EXECUTION_BACKEND','local') != 'modal':
+        return
+    if repository() is None:
+        raise RuntimeError('Modal execution requires RUN_DATABASE_URL')
+    from .execution import reconcile
+    try:
+        await reconcile(repository(),execution_provider(),run_id=run_id,locked=locked)
+    except Exception:
+        # Intent remains durable; credentials/provider unavailability never
+        # activates local heavy execution or erases accepted work.
+        return
 
 def artifact_store():
     if os.environ.get('LOCAL_ARTIFACT_DIR'):
@@ -127,6 +147,11 @@ RETENTION_SECONDS = float(os.environ.get('RUN_RETENTION_SECONDS', '3600'))
 async def lifespan(app):
     if len(os.environ.get('CHECKPOINT_SIGNING_KEY', '')) < 32:
         raise RuntimeError('Set CHECKPOINT_SIGNING_KEY to a stable operator secret of at least 32 characters; retain it across runner replacements for saved approvals')
+    if os.environ.get('EXECUTION_BACKEND','local') not in {'local','deferred','modal'}:
+        raise RuntimeError('Unsupported EXECUTION_BACKEND')
+    if os.environ.get('EXECUTION_BACKEND') == 'modal' and (repository() is None or not os.environ.get('MODAL_APP_NAME')):
+        raise RuntimeError('Configure durable repository and MODAL_APP_NAME for Modal execution')
+    await reconcile_remote()
     async def cleanup():
         while True:
             await asyncio.sleep(float(os.environ.get('RUN_CLEANUP_INTERVAL', '60')))
@@ -186,6 +211,8 @@ def public_value(value):
     return value
 
 async def invoke_stage(stage, patient_id, run_id=None):
+    if tool_transport.get() is not None:
+        return await tool_transport.get().patient(stage, patient_id, run_id)
     async with httpx.AsyncClient(timeout=300) as client:
         response = await client.post(os.environ.get('ENGINE_URL', 'http://127.0.0.1:8001') + '/' + stage,
             headers={'Authorization': f"Bearer {os.environ.get('ENGINE_SECRET', '')}"},
@@ -195,6 +222,8 @@ async def invoke_stage(stage, patient_id, run_id=None):
     return result['patients'][0]
 
 async def invoke_model_tool(stage, run, rows):
+    if tool_transport.get() is not None:
+        return await tool_transport.get().model(stage, run, rows)
     async with httpx.AsyncClient(timeout=300) as client:
         response = await client.post(os.environ.get('ENGINE_URL', 'http://127.0.0.1:8001') + '/' + stage,
             headers={'Authorization': f"Bearer {os.environ.get('ENGINE_SECRET', '')}"},
@@ -384,7 +413,12 @@ async def approve_run(run_id: str, approval: Approval, authorization: str = Head
         rows = [{'patient_id':r['patient_id'],'feature_schema':checkpoint['feature_schema'],'feature_version':checkpoint['feature_version'],
                  'values':dict(zip(checkpoint['feature_schema'],r['values']))} for r in checkpoint['feature_rows']]
         try:
-            prepared = await invoke_model_tool('eligibility',run,rows)
+            if os.environ.get('EXECUTION_BACKEND') == 'modal':
+                if checkpoint['model_version'] != run['model']['model_version'] or checkpoint['feature_version'] != run['model']['feature_version']:
+                    raise ValueError('Pinned model differs from disclosure')
+                prepared = run['eligibility']
+            else:
+                prepared = await invoke_model_tool('eligibility',run,rows)
         except Exception:
             raise HTTPException(503,'Cannot verify the disclosed cohort and model; approval remains pending')
         report = disposition_report(run,{**prepared,'processing_exclusions':run['eligibility']['processing_exclusions']})
@@ -399,8 +433,14 @@ async def approve_run(run_id: str, approval: Approval, authorization: str = Head
         if os.environ.get('EXECUTION_BACKEND','local') == 'local':
             runs[run['id']] = run
             run['task'] = asyncio.create_task(owned_execution(run,'scoring',run['gate_generation']))
+        await reconcile_remote(run_id,locked=True)
         return {'id':run_id,'status':run['status']}
 
+
+@app.get('/health')
+def health():
+    # Render's health probe must not wake Neon.
+    return {'status':'ok'}
 
 @app.get('/runs/launch-context')
 def launch_context():
@@ -422,6 +462,8 @@ async def stop_lost_launch(run_id):
 
 @app.post('/runs', status_code=201)
 async def create_run(selection: Selection):
+    if os.environ.get('EXECUTION_BACKEND') == 'modal' and repository() is None:
+        raise HTTPException(503,'Durable remote execution is not configured')
     ids = selection.patient_ids
     nonce = selection.launch_nonce
     if nonce and (len(nonce) < 32 or len(nonce) > 128 or not all(c.isalnum() or c in '-_' for c in nonce)):
@@ -433,6 +475,7 @@ async def create_run(selection: Selection):
         if existing:
             if existing['patient_ids'] != ids:
                 raise HTTPException(409,'Launch nonce was already used for a different selection')
+            await reconcile_remote(existing['id'])
             return {'id':existing['id'],'secret':existing['secret'],'status':existing['status']}
     if not repo and nonce and selection.worker_context != WORKER_CONTEXT:
         await stop_lost_launch(run_id)
@@ -466,6 +509,7 @@ async def create_run(selection: Selection):
         launches[nonce] = {'id': run['id'], 'patient_ids': list(ids)}
     if os.environ.get('EXECUTION_BACKEND','local') == 'local':
         run['task'] = asyncio.create_task(owned_execution(run))
+    await reconcile_remote(run['id'])
     return {'id': run['id'], 'secret': run['secret'], 'status': run['status']}
 
 def authorized(run_id, authorization):
@@ -547,13 +591,17 @@ async def restore_run(request: Request, authorization: str = Header(default=''))
     return {'id':run['id'],'status':run['status']}
 
 @app.get('/runs/{run_id}')
-def get_run(run_id: str, authorization: str = Header(default='')):
+async def get_run(run_id: str, authorization: str = Header(default='')):
+    run = authorized(run_id, authorization)
+    await reconcile_remote(run_id)
     run = authorized(run_id, authorization)
     return public_value({**{key: run[key] for key in ('id', 'status', 'patient_ids', 'patients', 'stage_results', 'events', 'model', 'eligibility', 'checkpoint', 'evaluation')},
             'sequence_base':run.get('sequence_base',0),'last_sequence':last_sequence(run)})
 
 @app.get('/runs/{run_id}/events')
 async def events(run_id: str, after: int = Query(default=0, ge=0), authorization: str = Header(default='')):
+    run = authorized(run_id, authorization)
+    await reconcile_remote(run_id)
     run = authorized(run_id, authorization)
     if after < run.get('sequence_base',0) or after > last_sequence(run):
         raise HTTPException(409, 'Reconnect from the saved checkpoint audit cursor')
@@ -575,8 +623,10 @@ async def events(run_id: str, after: int = Query(default=0, ge=0), authorization
 # Bounded, reconnectable delivery for function-hosted application proxies. Artifact
 # bytes are fetched separately, so replay never aggregates a cohort's images.
 @app.get('/runs/{run_id}/event-page')
-def event_page(run_id: str, after: int = Query(default=0, ge=0),
+async def event_page(run_id: str, after: int = Query(default=0, ge=0),
                limit: int = Query(default=20, ge=1, le=50), authorization: str = Header(default='')):
+    run = authorized(run_id, authorization)
+    await reconcile_remote(run_id)
     run = authorized(run_id, authorization)
     if after < run.get('sequence_base',0):
         raise HTTPException(409, 'Earlier audit events remain in browser History; reconnect from the saved checkpoint cursor')
@@ -630,6 +680,12 @@ async def cancel_run(run_id: str, authorization: str = Header(default='')):
         # append results or advance it while the process termination is in flight.
         run['status'] = 'canceling'
         persist(run,cancel=True)
+        if os.environ.get('EXECUTION_BACKEND') == 'modal':
+            await reconcile_remote(run_id,locked=True)
+            run = authorized(run_id,authorization)
+            if run['status'] != 'canceled':
+                raise HTTPException(503,'Remote worker stop is not confirmed; cancellation intent is saved')
+            return {'id':run_id,'status':'canceled'}
         if repository() and any(not owner['owner'].startswith('local:') for owner in repository().active_owners(run_id)):
             # #18 supplies provider cancellation/reconciliation. Local engine
             # acknowledgement cannot prove a remote invocation has stopped.

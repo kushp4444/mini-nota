@@ -1,4 +1,4 @@
--- Execute as schema owner after migrations/001_runs.sql, using psql variables:
+-- Execute as schema owner after ordered migrations 001 and 002, using psql variables:
 --   -v run_schema=run_store -v writer_role=mini_nota_run_writer
 --   -v catalog_role=mini_nota_catalog_reader
 -- Provision roles/logins separately; passwords must never appear in this file.

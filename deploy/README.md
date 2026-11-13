@@ -1,3 +1,5 @@
+The current deployment path is [the Render/Modal runbook](modal-render-runbook.md); it supersedes the historical candidate below.
+
 # Pre-migration release candidate (superseded hosting plan)
 
 The owner subsequently chose a lightweight Render dispatcher, Neon metadata/features/results, R2 scans/saved results and Modal heavy execution, with Vercel frontend. That approved durable persistence supersedes the browser-only and single-host deployment guidance below. This document preserves the tested local baseline and candidate Linux tooling for adaptation; **do not provision from it as the new plan**. Architecture/spec updates are owned by the integration coordinator.
