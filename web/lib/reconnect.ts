@@ -2,8 +2,13 @@ import { captureEvent, terminal, type SavedRun, type Audit } from './history';
 function interrupted(run: SavedRun, reason: string): SavedRun {
   return { ...run, status: 'failed', updatedAt: new Date().toISOString(), reason: `${reason} Saved results and artifact bytes are preserved in this browser. Outputs never received here cannot be recovered. Start a new run for interrupted computation.` };
 }
-export async function reconnectRun(initial: SavedRun, receive: (run: SavedRun) => Promise<void>, signal: AbortSignal): Promise<void> {
-  let run = initial, failures = 0, restored = false;
+export async function reconnectRun(
+  initial: SavedRun,
+  initialSaved: boolean,
+  receive: (run: SavedRun) => Promise<boolean>,
+  signal: AbortSignal,
+): Promise<'waiting_approval' | void> {
+  let run = initial, saved = initialSaved, failures = 0, restored = false;
   while (!terminal(run.status) && !signal.aborted) {
     try {
       const response = await fetch(`/api/runs/${encodeURIComponent(run.id)}/event-page?after=${run.lastSequence}&limit=20`, { headers: { Authorization: `Bearer ${run.secret}` }, cache: 'no-store', signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]) });
@@ -55,13 +60,19 @@ export async function reconnectRun(initial: SavedRun, receive: (run: SavedRun) =
         if (event.run_id !== run.id || event.sequence !== run.lastSequence + 1) throw Error('Event replay contains a gap or reordered sequence; completion has not been accepted');
         run = await captureEvent(run, event);
         if (signal.aborted) return;
-        await receive(run);
+        saved = await receive(run);
       }
       if (page.next_sequence !== run.lastSequence || page.last_sequence < run.lastSequence) throw Error('Event replay cursor mismatch; completion has not been accepted');
       if (terminal(page.status) && page.last_sequence === run.lastSequence && !terminal(run.status)) throw Error('Terminal run has no final event; completion has not been accepted');
       failures = 0;
       restored = false; // A later independent worker loss can recover this still-pending gate again.
-      if (!terminal(run.status) && page.last_sequence === run.lastSequence) await new Promise(resolve => setTimeout(resolve, 750));
+      if (page.last_sequence === run.lastSequence) {
+        if (page.status === 'waiting_approval' && run.status === 'waiting_approval' && run.checkpoint) {
+          if (!saved && !signal.aborted) saved = await receive(run);
+          if (saved && !signal.aborted) return 'waiting_approval';
+        }
+        if (!terminal(run.status)) await new Promise(resolve => setTimeout(resolve, 750));
+      }
     } catch (e) {
       if (signal.aborted) return;
       if (++failures >= 3) throw e;
