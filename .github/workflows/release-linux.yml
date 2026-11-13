@@ -44,7 +44,21 @@ jobs:
               /tmp/storage-fixture/bin/python -m pip install -r /app/deploy/requirements-storage-fixture.txt
               /tmp/storage-fixture/bin/python -m pytest tests/test_object_storage.py -q -p no:cacheprovider
               MOTO_SERVER_PYTHON=/tmp/storage-fixture/bin/python python -m pytest tests/test_durable_runs.py -q -p no:cacheprovider
+              python -m venv --system-site-packages /tmp/modal-worker
+              /tmp/modal-worker/bin/python -m pip install -r /app/deploy/requirements-modal-sdk.txt -c /app/deploy/requirements-runtime.txt
+              /tmp/modal-worker/bin/python -m pip check
+              MOTO_SERVER_PYTHON=/tmp/storage-fixture/bin/python /tmp/modal-worker/bin/python -m pytest tests/test_modal_worker.py -q -p no:cacheprovider
             '
+      - name: Build and inspect dispatcher-only runtime without credentials
+        run: |
+          docker build --platform linux/amd64 -f deploy/Dockerfile.dispatcher -t mini-nota:dispatcher .
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --entrypoint python mini-nota:dispatcher -m scripts.check_dispatcher
+      - name: Verify Modal SDK deployment definition without provisioning
+        run: |
+          python3 -m venv /tmp/modal-definition
+          /tmp/modal-definition/bin/python -m pip install -r deploy/requirements-dispatcher.txt
+          /tmp/modal-definition/bin/python -c 'import modal_app'
       - name: Report reproducibility contract
         run: |
           docker image inspect mini-nota:ci --format '{{.Id}} {{.Architecture}} {{.Os}}'

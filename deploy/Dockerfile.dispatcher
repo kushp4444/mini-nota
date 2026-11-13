@@ -1,0 +1,14 @@
+# Same verified official Python base; no compiler, scans or native engine.
+ARG PYTHON_BASE=python@sha256:998acd06f485adfd6890e3e15a4b542543e0cf22ff904310095da328a5e3e561
+FROM ${PYTHON_BASE}
+WORKDIR /app
+COPY deploy/requirements-dispatcher.txt ./requirements.txt
+RUN python -m pip install --no-cache-dir -r requirements.txt && python -m pip check \
+    && useradd --uid 10001 --create-home app
+COPY service/__init__.py service/app.py service/catalog.py service/run_repository.py service/execution.py service/object_storage.py ./service/
+COPY service/dispatcher.py ./service/dispatcher.py
+COPY scripts/check_dispatcher.py ./scripts/check_dispatcher.py
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 EXECUTION_BACKEND=modal
+USER 10001:10001
+EXPOSE 8000
+ENTRYPOINT ["python", "-m", "service.dispatcher"]

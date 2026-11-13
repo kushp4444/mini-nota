@@ -1,0 +1,37 @@
+# Import this Blueprint after account creation; actual secrets go in Environment.
+services:
+  - type: web
+    name: mini-nota-dispatcher
+    runtime: docker
+    plan: free
+    dockerfilePath: ./deploy/Dockerfile.dispatcher
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: "off"
+    envVars:
+      - key: EXECUTION_BACKEND
+        value: modal
+      - key: MODAL_APP_NAME
+        value: mini-nota
+      - key: MODAL_FUNCTION_NAME
+        value: run_phase
+      - key: MODAL_ENVIRONMENT
+        value: main
+      - key: CHECKPOINT_SIGNING_KEY
+        sync: false
+      - key: CATALOG_DATABASE_URL
+        sync: false
+      - key: RUN_DATABASE_URL
+        sync: false
+      - key: MODAL_TOKEN_ID
+        sync: false
+      - key: MODAL_TOKEN_SECRET
+        sync: false
+      - key: R2_RESULTS_ENDPOINT_URL
+        sync: false
+      - key: R2_RESULTS_BUCKET
+        sync: false
+      - key: R2_RESULTS_ACCESS_KEY_ID
+        sync: false
+      - key: R2_RESULTS_SECRET_ACCESS_KEY
+        sync: false

@@ -1,8 +1,8 @@
 # Durable run store
 
-Apply `python -m scripts.init_run_store` with `RUN_DATABASE_URL` set to the schema-owner connection before starting the dispatcher. Migration 001 is idempotent and does not touch `patient_catalog`, model/evaluation tables, scans or the frozen bundle. Runtime startup does not run DDL. Neon supports these ordinary PostgreSQL tables, row locks and transactions; no extension is required. Use TLS and provider-supported connection settings in deployment.
+Apply `python -m scripts.init_run_store` with `RUN_DATABASE_URL` set to the schema-owner connection before starting the dispatcher. Ordered migrations 001 and 002 are idempotent and does not touch `patient_catalog`, model/evaluation tables, scans or the frozen bundle. Runtime startup does not run DDL. Neon supports these ordinary PostgreSQL tables, row locks and transactions; no extension is required. Use TLS and provider-supported connection settings in deployment.
 
-Use a dedicated schema (for example `run_store`) owned by a migration role, a `run_writer` login for the API/worker and an independent `catalog_reader` login for `CATALOG_DATABASE_URL` (Next GraphQL uses its existing `DATABASE_URL`). The runtime `RUN_DATABASE_URL` must set the run schema search path. The catalog connection must have no access to that schema. Example grants, executed by an operator after creating the roles and schema:
+Use a dedicated schema (for example `run_store`) owned by a migration role, a `run_writer` login for the API/worker and an independent `catalog_reader` login for `CATALOG_DATABASE_URL` (Next GraphQL uses its existing `DATABASE_URL`). The runtime run-writer role must have its run schema as the default search path. Verify it on the actual Neon endpoint; transaction poolers may reject DSN `options` and must not depend on session SET. Local direct-connection tests use `options` only for isolated schemas. The catalog connection must have no access to that schema. Example grants, executed by an operator after creating the roles and schema:
 
 ```sql
 REVOKE ALL ON SCHEMA run_store FROM PUBLIC, catalog_reader;

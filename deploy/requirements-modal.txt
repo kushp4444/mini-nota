@@ -1,0 +1,3 @@
+# Frozen native contract plus independently resolved/pinned provider SDK.
+-r requirements-runtime.txt
+-r requirements-modal-sdk.txt
