@@ -20,14 +20,16 @@ class ModalProvider:
         return call.object_id
 
     async def poll(self, call_id):
-        from modal.exception import OutputExpiredError, FunctionTimeoutError, TimeoutError
+        from modal.exception import FunctionTimeoutError, OutputExpiredError, RemoteError, TimeoutError
         call = self.modal.FunctionCall.from_id(call_id)
         try:
             await call.get.aio(timeout=0)
             return 'finished'
         except OutputExpiredError:
             return 'expired'
-        except FunctionTimeoutError:
+        except (FunctionTimeoutError, RemoteError):
+            # The SDK reports a terminated input without a result as RemoteError.
+            # A retry after a DB outage still needs a fresh termination ack.
             return 'finished'
         except TimeoutError:
             return 'pending'
@@ -78,6 +80,11 @@ async def _reconcile_one(repo, provider, intent):
         except Exception:
             return
         return
+    if intent['status'] == 'interrupted':
+        # Older dispatchers could commit the stop before saving the failure.
+        # The operation already records provider acknowledgement.
+        repo.interrupt(intent)
+        return
     if known:
         try:
             states = [await provider.poll(call) for call in known]
@@ -95,12 +102,7 @@ async def _reconcile_one(repo, provider, intent):
                         return
             except Exception:
                 return
-            stopped = repo.reconcile_stopped(intent['id'],intent['owner'],intent['fence']) if intent['owner'] else repo.interrupt_unclaimed(intent['id'])
-            if stopped:
-                from . import app as policy
-                run = repo.get(intent['run_id'])
-                run['status'] = 'failed'
-                policy.emit(run,'done','Remote execution stopped before completion; available results retained.',{'status':'failed','reason':'Remote execution interrupted.','code':'remote_execution_interrupted'})
+            repo.interrupt(intent)
         # Known submitted calls are never automatically resubmitted.
         return
     if intent['status'] != 'pending' or not repo.dispatch_due(intent['id']):

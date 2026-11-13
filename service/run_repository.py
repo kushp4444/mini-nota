@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 import psycopg
@@ -172,20 +173,63 @@ class RunRepository:
                 conn.execute("UPDATE execution_operations SET status='stopped' WHERE run_id=%s AND status IN ('pending','owned')",(run['id'],))
         run['_revision'] += 1
 
-    def interrupt_unclaimed(self, operation_id):
-        """Only after all known provider calls prove stopped; never resubmit."""
+    def interrupt(self, intent):
+        """Record an acknowledged provider stop and its terminal audit atomically."""
+        run_id = intent['run_id']
         with psycopg.connect(self.database_url, connect_timeout=10) as conn:
-            row = conn.execute("UPDATE execution_operations SET status='interrupted' WHERE id=%s AND owner IS NULL AND status='pending' RETURNING id",(operation_id,)).fetchone()
-            return bool(row)
+            old = conn.execute(
+                'SELECT document, cancel_intent FROM visitor_runs WHERE id=%s FOR UPDATE',
+                (run_id,),
+            ).fetchone()
+            if old is None or old[1] or old[0]['status'] != 'running':
+                return
+            row = conn.execute(
+                """UPDATE execution_operations SET status='interrupted'
+                   WHERE id=%s AND run_id=%s AND status IN (%s, 'interrupted')
+                   AND owner IS NOT DISTINCT FROM %s AND fence=%s RETURNING id""",
+                (intent['id'], run_id, 'owned' if intent['owner'] else 'pending',
+                 intent['owner'], intent['fence']),
+            ).fetchone()
+            if row is None:
+                return
+            document = old[0]
+            sequence = document.get('sequence_base', 0) + len(document['events']) + 1
+            event = {
+                'id': f'{run_id}:{sequence}',
+                'run_id': run_id,
+                'sequence': sequence,
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'kind': 'done',
+                'message': 'Remote execution stopped before completion; available results retained.',
+                'payload': {
+                    'status': 'failed',
+                    'reason': 'Remote execution interrupted.',
+                    'code': 'remote_execution_interrupted',
+                },
+            }
+            document['status'] = 'failed'
+            document['events'].append(event)
+            conn.execute(
+                'INSERT INTO run_events(run_id, sequence, event) VALUES (%s,%s,%s)',
+                (run_id, sequence, Jsonb(event)),
+            )
+            conn.execute(
+                'UPDATE visitor_runs SET document=%s, revision=revision+1 WHERE id=%s',
+                (Jsonb(document), run_id),
+            )
 
     def reconcile_stopped(self, operation_id, owner, fence):
-        """Only call after provider proves invocation stopped/terminal.
+        """Record an owned invocation stop during cancellation, after provider acknowledgement.
 
-        Explicitly records interrupted failure; elapsed leases never suffice.
-        Returns whether the supplied ownership still matched.
+        Canceling runs remain discoverable until the terminal audit is saved.
         """
         with psycopg.connect(self.database_url, connect_timeout=10) as conn:
-            row = conn.execute("UPDATE execution_operations SET status='interrupted' WHERE id=%s AND owner=%s AND fence=%s AND status='owned' RETURNING id",(operation_id,owner,fence)).fetchone()
+            row = conn.execute(
+                """UPDATE execution_operations o SET status='interrupted'
+                   FROM visitor_runs r WHERE r.id=o.run_id AND r.cancel_intent
+                   AND o.id=%s AND o.owner=%s AND o.fence=%s AND o.status='owned' RETURNING o.id""",
+                (operation_id, owner, fence),
+            ).fetchone()
             return bool(row)
 
     def provider_calls(self, run_id):
@@ -209,7 +253,15 @@ class RunRepository:
     def pending(self, limit=20, run_id=None):
         """Private dispatcher reconciliation input, NEVER a public run listing."""
         with psycopg.connect(self.database_url, connect_timeout=10) as conn:
-            rows = conn.execute("SELECT o.id,o.run_id,o.status,o.owner,o.fence,o.submission_state,r.cancel_intent FROM execution_operations o JOIN visitor_runs r ON r.id=o.run_id WHERE (o.status IN ('pending','owned') OR (r.cancel_intent AND r.document->>'status'='canceling')) AND (%s::text IS NULL OR o.run_id=%s) ORDER BY o.created_at LIMIT %s",(run_id,run_id,min(limit,100))).fetchall()
+            rows = conn.execute(
+                """SELECT o.id,o.run_id,o.status,o.owner,o.fence,o.submission_state,r.cancel_intent
+                   FROM execution_operations o JOIN visitor_runs r ON r.id=o.run_id
+                   WHERE (o.status IN ('pending','owned')
+                       OR (o.status='interrupted' AND r.document->>'status'='running')
+                       OR (r.cancel_intent AND r.document->>'status'='canceling'))
+                   AND (%s::text IS NULL OR o.run_id=%s) ORDER BY o.created_at LIMIT %s""",
+                (run_id, run_id, min(limit, 100)),
+            ).fetchall()
             return [dict(zip(('id','run_id','status','owner','fence','submission_state','cancel_intent'),r)) for r in rows]
 
     @asynccontextmanager

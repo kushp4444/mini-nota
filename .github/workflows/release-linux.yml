@@ -54,6 +54,17 @@ jobs:
           docker build --platform linux/amd64 -f deploy/Dockerfile.dispatcher -t mini-nota:dispatcher .
           docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
             --entrypoint python mini-nota:dispatcher -m scripts.check_dispatcher
+      - name: Build exact Modal worker image with synthetic manifest and smoke test offline
+        run: |
+          test ! -e deploy/worker-manifest.json
+          trap 'rm -f deploy/worker-manifest.json' EXIT
+          printf '%s\n' '{"fixture":"synthetic packaging smoke, no assets"}' > deploy/worker-manifest.json
+          docker build --platform linux/amd64 -f deploy/Dockerfile.modal -t mini-nota:modal-smoke .
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --entrypoint sh mini-nota:modal-smoke -ec '
+              python -m pip check
+              python -c "import json, os; import modal, numpy, SimpleITK, radiomics, cv2, scipy, sklearn; from service.modal_worker import run_phase; assert json.load(open(os.environ[\"ASSET_MANIFEST\"])) == {\"fixture\": \"synthetic packaging smoke, no assets\"}"
+            '
       - name: Verify Modal SDK deployment definition without provisioning
         run: |
           python3 -m venv /tmp/modal-definition

@@ -64,8 +64,8 @@ async def run_phase(operation_id, provider_call_id, *, assets=None, source_clien
         try:
             saved = repo.get(run['id'])
             saved['_operation'] = operation
-            saved['status'] = 'failed'
             policy.emit(saved, 'error', 'Remote execution failed; available results retained.', {'code':'remote_execution_failed'})
+            saved['status'] = 'failed'
             policy.emit(saved, 'done', 'Run failed.', {'status':'failed','reason':'Remote execution failed.'})
         except Conflict:
             return {'status':'stopped'}

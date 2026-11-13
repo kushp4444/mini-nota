@@ -316,11 +316,11 @@ async def execute(run):
     except Exception as exc:
         if run['status'] != 'running':
             return
-        run['status'] = 'failed'
         if isinstance(exc,httpx.HTTPStatusError) and exc.response.status_code == 422:
             emit(run,'error','Frozen-model input rejected; scoring stopped and available results retained.',{'code':'incompatible_model_input','errors':exc.response.json().get('detail',[])})
         else:
             emit(run, 'error', 'Imaging or model service unavailable; available patient results retained.', {'code': 'engine_unavailable'})
+        run['status'] = 'failed'
         emit(run, 'done', 'Run failed.', {'status': 'failed'})
 
 def disposition_report(run, report):
@@ -389,8 +389,8 @@ async def score_run(run, rows):
                 return
             except Exception:
                 pass
-        run['status'] = 'failed'
         emit(run,'error','Model scoring failed; available results retained.',{'code':'scoring_failed'})
+        run['status'] = 'failed'
         emit(run,'done','Run failed.',{'status':'failed','reason':'Model scoring failed.'})
 
 

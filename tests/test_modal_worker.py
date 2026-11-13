@@ -323,3 +323,80 @@ def test_unclaimed_expired_provider_input_fails_instead_of_waiting_forever(clien
     assert saved['status'] == 'failed'
     assert saved['events'][-1]['payload']['code'] == 'remote_execution_interrupted'
     assert provider.counter == 1
+
+
+@pytest.mark.parametrize('claimed', [False, True])
+def test_provider_interruption_retries_when_terminal_audit_write_fails(client, monkeypatch, tmp_path, claimed):
+    import psycopg
+
+    setup_run_store(monkeypatch, tmp_path)
+    monkeypatch.setenv('EXECUTION_BACKEND', 'modal')
+    provider = ProviderFixture()
+    monkeypatch.setattr(runner, 'execution_provider', lambda: provider)
+    receipt = client.post('/runs', json={'patient_ids': ['TEST-CLEAN']}).json()
+    path = '/runs/' + receipt['id']
+    auth = {'Authorization': f"Bearer {receipt['secret']}"}
+    call_id, call = next(iter(provider.calls.items()))
+    if claimed:
+        assert runner.repository().claim(call['operation_id'], call_id) == 1
+    provider.calls[call_id]['status'] = 'expired'
+    database_url = os.environ['DATABASE_URL']
+    with psycopg.connect(database_url) as conn:
+        conn.execute("""
+            ALTER TABLE run_events ADD CONSTRAINT fixture_reject_interruption
+            CHECK (event->'payload'->>'code' <> 'remote_execution_interrupted') NOT VALID
+        """)
+    try:
+        saved = client.get(path, headers=auth).json()
+        assert saved['status'] == 'running'
+        assert provider.calls[call_id]['status'] == 'stopped'
+        assert all(event['kind'] != 'done' for event in saved['events'])
+    finally:
+        with psycopg.connect(database_url) as conn:
+            conn.execute('ALTER TABLE run_events DROP CONSTRAINT fixture_reject_interruption')
+
+    runner._repositories.clear()
+    saved = client.get(path, headers=auth).json()
+    assert saved['status'] == 'failed'
+    done = [event for event in saved['events'] if event['kind'] == 'done']
+    assert len(done) == 1
+    assert done[0]['payload']['code'] == 'remote_execution_interrupted'
+    assert provider.counter == 1
+
+
+def test_worker_diagnostic_keeps_run_recoverable_until_terminal_audit_commits(client, monkeypatch, tmp_path):
+    import psycopg
+    from service.modal_worker import run_phase
+
+    class UnavailableAssets:
+        def selected(self, *args, **kwargs):
+            raise OSError('Explicit source bootstrap failure')
+
+    setup_run_store(monkeypatch, tmp_path)
+    monkeypatch.setenv('EXECUTION_BACKEND', 'modal')
+    provider = ProviderFixture()
+    monkeypatch.setattr(runner, 'execution_provider', lambda: provider)
+    receipt = client.post('/runs', json={'patient_ids': ['TEST-CLEAN']}).json()
+    path = '/runs/' + receipt['id']
+    auth = {'Authorization': f"Bearer {receipt['secret']}"}
+    call_id, call = next(iter(provider.calls.items()))
+    database_url = os.environ['DATABASE_URL']
+    with psycopg.connect(database_url) as conn:
+        conn.execute("""
+            ALTER TABLE run_events ADD CONSTRAINT fixture_reject_worker_done
+            CHECK (event->>'message' <> 'Run failed.') NOT VALID
+        """)
+    try:
+        with pytest.raises(psycopg.errors.CheckViolation):
+            asyncio.run(run_phase(call['operation_id'], call_id, assets=UnavailableAssets()))
+        saved = client.get(path, headers=auth).json()
+        assert saved['status'] == 'running'
+        assert saved['events'][-1]['payload']['code'] == 'remote_execution_failed'
+    finally:
+        with psycopg.connect(database_url) as conn:
+            conn.execute('ALTER TABLE run_events DROP CONSTRAINT fixture_reject_worker_done')
+
+    call['status'] = 'finished'
+    saved = client.get(path, headers=auth).json()
+    assert saved['status'] == 'failed'
+    assert saved['events'][-1]['kind'] == 'done'
