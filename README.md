@@ -1,6 +1,6 @@
 # Mini-Nota
 
-**Architecture migration checkpoint:** the owner has now selected Vercel + Render Free dispatcher + Neon Free + Cloudflare R2 + Modal Functions, with saved results in Neon/R2. The implementation and measurements below describe the pre-migration browser-local baseline. The durable PostgreSQL run store is available through `RUN_DATABASE_URL`; remote Modal execution and hosted verification remain pending; `deploy/` preserves the earlier single-host candidate and must not be treated as the new deployment plan.
+**Deployment:** the [Render/Modal runbook](deploy/modal-render-runbook.md) covers Vercel, Render, Neon, Cloudflare R2 and Modal Functions. The remote worker and dispatcher have been exercised locally with PostgreSQL and S3-compatible storage. Hosted verification still requires provider accounts. The measurements below describe the local demo.
 
 Mini-Nota is an unauthenticated public-data imaging workflow demonstration: select held-out Lung1 patients, inspect scan checks, tumor masks, 72 radiomic measurements and frozen-model risk rankings, and review the actual tool calls and decisions. Patients, Analysis, browser-local History and immediately viewable curated examples share a NOTA-inspired workspace. This independent project is not affiliated with Altis Labs, a medical device or medical advice.
 
@@ -8,7 +8,7 @@ The actual prepared collection contains 422 inventoried patients, 8 objective pr
 
 Next.js/TypeScript supplies the browser UI, GraphQL and same-origin control proxy. The default local runner invokes a private FastAPI imaging engine. Set `RUN_DATABASE_URL` after applying the [durable run migration](migrations/README.md) to retain run ownership, ordered audit, features, gate checkpoints and saved results in PostgreSQL across dispatcher replacement. Artifacts use verified object references through the R2 storage seam; local development may explicitly configure `LOCAL_ARTIFACT_DIR`. Keep catalog-reader and run-writer credentials separate. There is no public visitor-run listing or account identity.
 
-Browser IndexedDB also retains terminal results and downloaded artifact bytes. A stable operator signing key permits valid existing browser-saved approval checkpoints to resume without a gate deadline. Closing a tab does not cancel work; confirmed cancellation stops the owned tool. Clearing browser data loses local History and its private run capabilities. Without `RUN_DATABASE_URL`, the original temporary local-runner behavior remains available for development. Remote execution and provider reconciliation are delivered separately by #18; a restarted local dispatcher never steals an operation whose worker may still be alive.
+Browser IndexedDB also retains terminal results and downloaded artifact bytes. A stable operator signing key permits valid existing browser-saved approval checkpoints to resume without a gate deadline. Closing a tab does not cancel work; confirmed cancellation stops the owned tool. Clearing browser data loses local History and its private run capabilities. Without `RUN_DATABASE_URL`, the temporary local runner remains available for development. In the hosted architecture, Modal owns live work independently of Render, and the dispatcher reconciles from durable state after a restart.
 
 ## Local setup
 
@@ -54,6 +54,6 @@ REQUIRE_STORAGE_FIXTURE=1 /tmp/mini-nota-storage-fixture/bin/python -m pytest te
 
 These are local S3 fixture checks, not actual R2 verification. See [storage handoff](docs/ticket-17-handoff.md) for manifest bootstrap, role-specific credentials and integration requirements.
 
-See [release runbook](deploy/README.md) for the Vercel frontend, read-only database initialization, immutable held-out-only asset manifest, pinned Linux image build, single-owner supervisor, tmpfs cleanup, payload bounds and hosted verification gates. See [release evidence](docs/ticket-15-handoff.md) for measured local execution and precise external blockers. Public deployment and Linux numerical parity require actual target verification before the demo is declared ready.
+See the [hosted deployment runbook](deploy/modal-render-runbook.md) for provider configuration and qualification. The [local release evidence](docs/ticket-15-handoff.md) records the full 82-patient run; the [worker handoff](docs/ticket-18-handoff.md) records the separate real-patient run through the new storage and worker path. Hosted verification includes comparing freshly extracted Linux features and scores with the frozen model contract.
 
 The original offline CLI (`python -m src.pipeline`) remains available for development; its legacy survival fitting is separate from the hosted frozen-model workflow. Numerical geometry, measurement and survival behavior are documented in `docs/ticket-4-handoff.md` through `docs/ticket-8-handoff.md`.
