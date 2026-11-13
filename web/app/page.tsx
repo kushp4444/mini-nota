@@ -3,8 +3,10 @@ import { loadExample, type Example } from "../lib/examples";
 import ApprovalGate from "../components/ApprovalGate";
 import ScoreResults, { HeldOutBenchmark } from "../components/ScoreResults";
 import QCResults from "../components/QCResults";
-import MaskResults, { type MaskPatientResult } from "../components/MaskResults";
-import FeatureResults, { type FeaturePatientResult } from "../components/FeatureResults";
+import MaskResults from "../components/MaskResults";
+import FeatureResults from "../components/FeatureResults";
+import usePatientResults from "../components/usePatientResults";
+import MissingArtifact, { type ArtifactRecovery } from "../components/MissingArtifact";
 import { useEffect, useRef, useState } from "react";
 import History from "../components/History";
 import { recoverLaunch, StoppedLaunch } from "../lib/launch";
@@ -12,29 +14,21 @@ import { reconnectRun } from "../lib/reconnect";
 import CancelRun from "../components/CancelRun";
 import { browserRun, watchBrowserRun, reserveBrowserRun, attachBrowserRun, releaseBrowserRun, pendingLaunch, reclaimBrowserRun, type PendingLaunch } from "../lib/browser-run";
 import {
-  Audit,
   SavedRun,
   createSavedRun,
   readRuns,
+  recoverArtifact,
+  retainArtifactBytes,
   saveRun,
   storageMessage,
   terminal,
 } from "../lib/history";
 type Patient = { id: string; label: string; fixture: boolean };
-type Result = {
-  patient_id: string;
-  status: string;
-  values: Record<string, { passed: boolean; detail: string }>;
-  errors: { message: string }[];
-};
 export default function Home() {
   const [view, setView] = useState("Patients"),
     [catalog, setCatalog] = useState<Patient[]>([]),
     [selection, setSelection] = useState<string[]>([]),
-    [events, setEvents] = useState<Audit[]>([]),
-    [results, setResults] = useState<Result[]>([]),
-    [masks, setMasks] = useState<MaskPatientResult[]>([]),
-    [features, setFeatures] = useState<FeaturePatientResult[]>([]),
+    [displayedRun, setDisplayedRun] = useState<SavedRun>(),
     [status, setStatus] = useState("idle"),
     [error, setError] = useState(""),
     [history, setHistory] = useState<SavedRun[]>([]),
@@ -95,24 +89,31 @@ export default function Home() {
   }, []);
   async function persist(run: SavedRun) {
     if (activeRun.current?.id === run.id && terminal(activeRun.current.status) && !terminal(run.status)) return false;
+    run = retainArtifactBytes(run, activeRun.current);
     activeRun.current = run;
     if (terminal(run.status)) { releaseBrowserRun(run.id); if (run.launchNonce) releaseBrowserRun(run.launchNonce); }
     setSaved(false);
     try {
-      await saveRun(run);
-      persistedRun.current = run;
+      const stored = await saveRun(run);
+      // A recovery may finish while this snapshot is being written.
+      if (activeRun.current?.id === run.id)
+        activeRun.current = retainArtifactBytes(activeRun.current, stored);
+      persistedRun.current = stored;
       if (run.launchNonce) attachBrowserRun(run.launchNonce, run.id);
       if (terminal(run.status)) releaseBrowserRun(run.id);
       setSaved(true);
       setStorageError("");
       if (terminal(run.status))
-        setHistory((prev) => [run, ...prev.filter((r) => r.id !== run.id)]);
+        setHistory((prev) => [stored, ...prev.filter((r) => r.id !== run.id)]);
       return true;
     } catch (e) {
       setStorageError(storageMessage(e));
       return false;
     }
   }
+  const events = displayedRun?.events ?? [];
+  const { qc: results, masks, features } = usePatientResults(displayedRun);
+  const analysisIds = displayedRun?.patientIds ?? launchPending?.patientIds ?? selection;
   const displayedEvents =
     view === "Examples" ? example?.events || [] : view === "History" ? savedSelection?.events || [] : events;
   useEffect(() => {
@@ -131,26 +132,36 @@ export default function Home() {
         setError("The patient catalog is unavailable. Please try again later."),
       );
   }, []);
-  async function displayRun(run: SavedRun) {
-    setEvents(run.events);
-    setStatus(run.status);
-    const featurePatients = structuredClone(run.events.filter(e => e.kind === "tool_result" && e.payload.stage === "features" && e.payload.patient).map(e => e.payload.patient));
-    setResults(run.events.filter(e => e.kind === "tool_result" && e.payload.stage === "qc").map(e => e.payload.patient));
-    const patients = structuredClone(run.events.filter(e => e.kind === "tool_result" && e.payload.stage === "masks").map(e => e.payload.patient));
-    for (const patient of [...patients,...featurePatients]) {
-      for (const artifact of patient.artifacts || []) {
-        const savedArtifact = run.artifacts.find(a => a.patientId === patient.patient_id && a.role === artifact.role && a.blob);
-        if (savedArtifact?.blob) artifact.data_base64 = await new Promise<string>(resolve => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result).split(",")[1]);
-          reader.readAsDataURL(savedArtifact.blob!);
-        });
-      }
+  const retryArtifact: ArtifactRecovery = async (run, artifact) => {
+    const recovered = await recoverArtifact(run, artifact);
+    const latest = activeRun.current?.id === run.id ? activeRun.current : run;
+    const updated = {...latest, artifacts: latest.artifacts.map(item =>
+      item.id === recovered.id && !item.blob ? recovered : item)};
+    let stored: SavedRun;
+    try {
+      stored = await saveRun(updated);
+      setStorageError("");
+    } catch (failure) {
+      setStorageError(storageMessage(failure));
+      throw Error("Downloaded bytes could not be saved. Retry when browser storage is available.");
     }
-    setMasks(patients);
-    setFeatures(featurePatients);
+    if (activeRun.current?.id === run.id) {
+      activeRun.current = retainArtifactBytes(activeRun.current, stored);
+      setDisplayedRun(activeRun.current);
+    }
+    if (terminal(stored.status)) {
+      setHistory(previous => previous.map(item => item.id === stored.id ? stored : item));
+      setSavedSelection(previous => previous?.id === stored.id ? stored : previous);
+    }
+  };
+
+  function displayRun(run: SavedRun) {
+    setDisplayedRun(run);
+    setStatus(run.status);
   }
+
   async function follow(run: SavedRun) {
+    run = retainArtifactBytes(run, activeRun.current);
     connection.current?.abort();
     const controller = new AbortController();
     connection.current = controller;
@@ -160,12 +171,13 @@ export default function Home() {
     try {
       await reclaimBrowserRun(run.id);
       if (controller.signal.aborted) return;
-      await displayRun(run);
-      const outcome = await reconnectRun(run, persistedRun.current === run, async next => {
+      displayRun(run);
+      const outcome = await reconnectRun(run, persistedRun.current?.id === run.id && persistedRun.current.lastSequence === run.lastSequence, async next => {
         const stored = await persist(next);
         if (controller.signal.aborted) return stored;
-        await displayRun(next);
-        setUnfinished(terminal(next.status) ? undefined : next);
+        const current = activeRun.current?.id === next.id ? activeRun.current : next;
+        displayRun(current);
+        setUnfinished(terminal(current.status) ? undefined : current);
         if (next.reason && next.status === "failed") setError(next.reason);
         return stored;
       }, controller.signal);
@@ -195,10 +207,7 @@ export default function Home() {
     setError("");
     setSaved(false);
     activeRun.current = undefined;
-    setEvents([]);
-    setResults([]);
-    setMasks([]);
-    setFeatures([]);
+    setDisplayedRun(undefined);
     setStatus("running");
     setView("Analysis");
     await launchAndFollow({nonce:reservation,patientIds:selection});
@@ -221,7 +230,7 @@ export default function Home() {
         setLaunchPending(undefined);
         const failed = {...createSavedRun({id:`launch-${launch.nonce}`,secret:"",status:"failed"},launch.patientIds), reason:e.message};
         await persist(failed);
-        setStatus("failed");
+        displayRun(failed);
       } else setStatus("disconnected");
       setError(e instanceof Error ? e.message : "Launch recovery unavailable");
     }
@@ -259,7 +268,7 @@ export default function Home() {
           </div>
         </div>
         <div className="workspace">
-          Lung1 demonstration <span>⌄</span>
+          Lung1 demonstration
         </div>
         <div className="nav-label">WORKSPACE</div>
         {[
@@ -331,7 +340,7 @@ export default function Home() {
               </div>
               <div>
                 <small>Selected cohort</small>
-                <strong>{selection.length} patients</strong>
+                <strong>{(view === "Analysis" ? analysisIds : view === "History" && savedSelection ? savedSelection.patientIds : selection).length} patients</strong>
               </div>
               <div>
                 <small>Workflow</small>
@@ -373,15 +382,9 @@ export default function Home() {
                   {status === "waiting_approval" ? "Approval gate saved in this browser" : "Saved in this browser"}
                 </p>
               )}
-            {view !== "History" &&
-              activeRun.current?.artifacts.some(
-                (artifact) => artifact.error,
-              ) && (
-                <p role="alert" className="error">
-                  Some artifacts could not be saved. Open History for the
-                  available results and named missing-artifact reasons.
-                </p>
-              )}
+            {view === "Analysis" && displayedRun?.artifacts.filter(artifact => !artifact.blob).map(artifact =>
+              <MissingArtifact key={artifact.id} run={displayedRun} artifact={artifact} onRecover={retryArtifact} />
+            )}
             {view === "Examples" ? (
               <>
                 {exampleError && <p role="alert">{exampleError}</p>}
@@ -400,6 +403,7 @@ export default function Home() {
                 runs={history}
                 selected={savedSelection}
                 onSelect={setSavedSelection}
+                onRecover={retryArtifact}
               />
             ) : view === "Patients" ? (
               <div className="card">
@@ -486,7 +490,7 @@ export default function Home() {
                   <div>
                     <small>Selected cohort</small>
                     <strong>
-                      {selection.length} patients · QC, masks, features and scoring
+                      {analysisIds.length} patients · QC, masks, features and scoring
                     </strong>
                   </div>
                   <span className={`status ${status}`}>
@@ -495,11 +499,11 @@ export default function Home() {
                 </div>
                 <HeldOutBenchmark events={events} />
                 {!events.length && <div className="card stage-empty"><p>Start a run to see real patient checks arrive here.</p><button className="primary" onClick={start} disabled={recoveringHistory || !selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}>Run analysis →</button></div>}
-                <QCResults selectedIds={selection} results={results} ended={terminal(status)} />
-                <MaskResults selectedIds={selection} results={masks} qcResults={results} ended={terminal(status)} />
-                <FeatureResults selectedIds={selection} results={features} qcResults={results} maskResults={masks} ended={terminal(status)} />
+                <QCResults selectedIds={analysisIds} results={results} ended={terminal(status)} />
+                <MaskResults selectedIds={analysisIds} results={masks} qcResults={results} ended={terminal(status)} />
+                <FeatureResults selectedIds={analysisIds} results={features} qcResults={results} maskResults={masks} ended={terminal(status)} />
                 {activeRun.current && <ApprovalGate run={activeRun.current} onApprove={approveCurrent} />}
-                <ScoreResults selectedIds={selection} events={events} showBenchmark={false} />
+                <ScoreResults selectedIds={analysisIds} events={events} showBenchmark={false} />
               </>
             )}
           </section>

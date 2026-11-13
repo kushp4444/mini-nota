@@ -3,8 +3,10 @@ import { useEffect, useState } from "react";
 import FeatureResults from "./FeatureResults";
 import ScoreResults, { HeldOutBenchmark } from "./ScoreResults";
 import QCResults from "./QCResults";
-import MaskResults, { type MaskPatientResult } from "./MaskResults";
-import { SavedArtifact, SavedRun, terminal } from "../lib/history";
+import MaskResults from "./MaskResults";
+import usePatientResults from "./usePatientResults";
+import MissingArtifact, { type ArtifactRecovery } from "./MissingArtifact";
+import { type Audit, type SavedArtifact, type SavedRun, terminal } from "../lib/history";
 export function SavedArtifactView({ artifact }: { artifact: SavedArtifact }) {
   const [url, setUrl] = useState("");
   useEffect(() => {
@@ -13,13 +15,7 @@ export function SavedArtifactView({ artifact }: { artifact: SavedArtifact }) {
     setUrl(objectUrl);
     return () => URL.revokeObjectURL(objectUrl);
   }, [artifact.blob]);
-  if (!artifact.blob || artifact.error)
-    return (
-      <p role="alert" className="error-text">
-        Missing artifact: {artifact.role}.{" "}
-        {artifact.error || "Saved bytes are unavailable."}
-      </p>
-    );
+  if (!artifact.blob) return null;
   return (
     <figure className="saved-artifact">
       {artifact.mediaType.startsWith("image/") && url ? (
@@ -42,37 +38,46 @@ export function SavedArtifactView({ artifact }: { artifact: SavedArtifact }) {
     </figure>
   );
 }
+function stageNames(events: Audit[]) {
+  const observed = events.map(event => event.payload.stage).filter(Boolean);
+  // Older saved runs used "survival"; retain that label when the audit contains it.
+  const scoringStage = observed.includes("survival") && !observed.includes("score") ? "survival" : "score";
+  return [...new Set(["qc", "masks", "features", scoringStage, ...observed])];
+}
+
+function gateStatus(run: SavedRun, gate: Audit, nextGate?: Audit) {
+  const checkpoint = gate.payload.checkpoint;
+  const approved = run.events.some(event => {
+    if (event.sequence <= gate.sequence || (nextGate && event.sequence >= nextGate.sequence) ||
+        event.kind !== "decision" || event.payload.action !== "approve") return false;
+    // Legacy curated records omit checkpoint identity; use their recorded decision.
+    return !checkpoint?.disclosure_id || (
+      event.payload.disclosure_id === checkpoint.disclosure_id &&
+      event.payload.model_version === checkpoint.model_version
+    );
+  });
+  if (approved) return nextGate ? "Approval recorded. A later disclosure superseded this gate." : "Approval recorded.";
+  if (nextGate) return "Superseded before approval.";
+  return terminal(run.status) ? "Run ended before approval." : "Awaiting approval.";
+}
+
 export default function History({
   runs,
   selected,
   onSelect,
+  onRecover,
   example = false,
 }: {
   runs: SavedRun[];
   example?: boolean;
   selected?: SavedRun;
   onSelect: (run: SavedRun) => void;
+  onRecover?: ArtifactRecovery;
 }) {
   const [detailsOpen,setDetailsOpen] = useState(false);
-  const [retained,setRetained] = useState<Record<string,MaskPatientResult[]>>({});
-  useEffect(()=>{
-    let active=true;
-    setDetailsOpen(false);
-    if (!selected) {setRetained({});return;}
-    void (async()=>{
-      const stages:Record<string,MaskPatientResult[]> = {};
-      for(const stage of ['qc','masks','features']) {
-        const patients = structuredClone(selected.events.filter(e=>e.kind==='tool_result'&&e.payload.stage===stage&&e.payload.patient).map(e=>e.payload.patient));
-        for(const patient of patients) for(const artifact of patient.artifacts||[]) {
-          const saved=selected.artifacts.find(a=>a.stage===stage&&a.patientId===patient.patient_id&&a.role===artifact.role);
-          if(saved?.blob) artifact.data_base64=await new Promise<string>(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.readAsDataURL(saved.blob!);});
-        }
-        stages[stage]=patients;
-      }
-      if(active)setRetained(stages);
-    })();
-    return()=>{active=false;};
-  },[selected]);
+  const retained = usePatientResults(selected);
+  const gates = selected?.events.filter(event => event.kind === "gate" && event.payload.report) ?? [];
+  useEffect(() => setDetailsOpen(false), [selected?.id]);
   return (
     <div className="history">
       {!example && <div className="card card-heading">
@@ -128,22 +133,14 @@ export default function History({
             results={retained.features||[]}
             qcResults={retained.qc||[]}
             maskResults={retained.masks||[]} ended />}
-          {selected.events.filter(e => e.kind === "gate" && e.payload.report).map(e => <section key={e.id} aria-label="Recorded exclusion approval">
-            <h3>Recorded exclusion disclosure</h3><p>Read-only audit · approval decision recorded in the timeline.</p>
+          {gates.map((e, index) => <section key={e.id} aria-label="Recorded exclusion approval">
+            <h3>Recorded exclusion disclosure</h3><p>{gateStatus(selected, e, gates[index + 1])}</p>
             <p>{e.payload.report.scoring_eligible_count} scoring-eligible patients · {e.payload.report.evaluation_eligible_count} evaluation-eligible patients</p>
             <table><thead><tr><th>Patient</th><th>Scoring</th><th>Evaluation</th><th>Reason</th></tr></thead><tbody>{e.payload.report.dispositions.map((p:any) => <tr key={p.patient_id}><td>{p.patient_id}</td><td>{p.scoring_eligible ? "Eligible" : "Excluded"}</td><td>{p.evaluation_eligible ? "Eligible" : "Excluded"}</td><td>{p.reasons.map((r:any) => r.message).join("; ") || "Usable features and outcome"}</td></tr>)}</tbody></table>
           </section>)}
           <details><summary>Selected patients ({selected.patientIds.length})</summary><p>{selected.patientIds.join(", ")}</p></details>
           <details className="structured-details" onToggle={e=>setDetailsOpen(e.currentTarget.open)}><summary>Structured stage details</summary>{detailsOpen && selected.events.filter(e=>e.kind==='tool_result'||e.payload.report).map(event=><div className="saved-result" key={event.id}><h4>{event.payload.stage} · {event.payload.patient?.patient_id||'cohort'}</h4><pre>{JSON.stringify(event.payload,null,2)}</pre></div>)}</details>
-          {Array.from(
-            new Set([
-              "qc",
-              "masks",
-              "features",
-              selected.events.some(e => e.payload.stage === "score") ? "score" : "survival",
-              ...selected.events.map((e) => e.payload.stage).filter(Boolean),
-            ]),
-          ).map((stage) => {
+          {stageNames(selected.events).map((stage) => {
             const results = selected.events.filter(
               (e) => e.payload.stage === stage && (e.kind === "tool_result" || (stage === "eligibility" && e.payload.report)),
             );
@@ -191,7 +188,8 @@ export default function History({
                 {selected.artifacts
                   .filter((a) => a.stage === stage && !(stage === "masks" && a.role === "overlay" && a.mediaType === "image/png" && a.blob && !a.error))
                   .map((a) => (
-                    <SavedArtifactView key={a.id} artifact={a} />
+                    a.blob ? <SavedArtifactView key={a.id} artifact={a} /> :
+                    <MissingArtifact key={a.id} run={selected} artifact={a} onRecover={onRecover} />
                   ))}
               </article>
             );

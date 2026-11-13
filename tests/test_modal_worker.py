@@ -400,3 +400,54 @@ def test_worker_diagnostic_keeps_run_recoverable_until_terminal_audit_commits(cl
     saved = client.get(path, headers=auth).json()
     assert saved['status'] == 'failed'
     assert saved['events'][-1]['kind'] == 'done'
+
+
+@pytest.mark.parametrize('final_attempt', ['unknown', 'registered', 'claimed'])
+def test_dispatch_exhaustion_only_fails_unclaimed_unconfirmed_work(client, monkeypatch, tmp_path, final_attempt):
+    import psycopg
+    from service.modal_worker import run_phase
+
+    setup_run_store(monkeypatch, tmp_path)
+    monkeypatch.setenv('EXECUTION_BACKEND', 'modal')
+    provider = ProviderFixture()
+    monkeypatch.setattr(runner, 'execution_provider', lambda: provider)
+    provider.lose_response = True
+    receipt = client.post('/runs', json={'patient_ids': ['TEST-CLEAN']}).json()
+    path = '/runs/' + receipt['id']
+    auth = {'Authorization': f"Bearer {receipt['secret']}"}
+
+    def age_submissions():
+        with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+            conn.execute("""
+                UPDATE operation_submissions SET created_at = now() - interval '31 seconds'
+                WHERE operation_id = (SELECT id FROM execution_operations WHERE run_id = %s)
+            """, (receipt['id'],))
+
+    for attempt in range(2):
+        age_submissions()
+        provider.lose_response = attempt == 0 or final_attempt != 'registered'
+        assert client.get(path, headers=auth).json()['status'] == 'running'
+    assert provider.counter == 3
+    assert client.get(path, headers=auth).json()['status'] == 'running'
+    if final_attempt == 'claimed':
+        call_id, call = list(provider.calls.items())[-1]
+        assert runner.repository().claim(call['operation_id'], call_id) == 1
+
+    age_submissions()
+    saved = client.get(path, headers=auth).json()
+    if final_attempt != 'unknown':
+        assert saved['status'] == 'running'
+        assert not any(event['kind'] == 'done' for event in saved['events'])
+        assert provider.counter == 3
+        return
+    assert saved['status'] == 'failed'
+    assert saved['events'][-1]['payload']['code'] == 'remote_dispatch_unconfirmed'
+    assert len([event for event in saved['events'] if event['kind'] == 'done']) == 1
+    assert client.get(path, headers=auth).json()['events'] == saved['events']
+
+    assets = LocalFixtureAssets(client.fixture_outcomes.parent)
+    for call_id, call in provider.calls.items():
+        assert call['status'] == 'pending'  # No provider stop was asserted.
+        assert asyncio.run(run_phase(call['operation_id'], call_id, assets=assets))['status'] == 'skipped'
+    assert assets.scan_requests == []
+    assert provider.counter == 3

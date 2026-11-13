@@ -28,6 +28,7 @@ test('failure fixture discloses named exclusions and recorded approval without v
   await expect(page.getByText('Deliberately introduced fixture faults; the live library is unchanged.',{exact:true})).toBeVisible();
   await expect(page.getByRole('region',{name:'Recorded exclusion approval'})).toContainText('2 scoring-eligible patients · 1 evaluation-eligible patients');
   await expect(page.getByRole('region',{name:'Recorded exclusion approval'})).toContainText('LUNG1-015');
+  await expect(page.getByRole('region',{name:'Recorded exclusion approval'})).toContainText('Approval recorded.');
   await expect(page.getByRole('region',{name:'Recorded exclusion approval'})).toContainText('No recorded outcome; risk scoring remains available');
   await expect(page.getByRole('button',{name:'Approve disclosed cohort and score'})).toHaveCount(0);
   const events = page.locator('.timeline .event');

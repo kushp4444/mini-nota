@@ -57,22 +57,32 @@ export function storageMessage(error: unknown) {
     : "Browser history is unavailable or could not be saved. Results may be lost when you leave. " +
         (error instanceof Error ? error.message : "");
 }
-export async function saveRun(run: SavedRun): Promise<void> {
+/** Keep already downloaded bytes when a different replay or tab writes a snapshot. */
+export function retainArtifactBytes(run: SavedRun, other?: SavedRun): SavedRun {
+  if (other?.id !== run.id) return run;
+  const byId = new Map(other.artifacts.filter(artifact => artifact.blob).map(artifact => [artifact.id, artifact]));
+  const artifacts = run.artifacts.map(artifact => artifact.blob ? artifact : byId.get(artifact.id) ?? artifact);
+  return {...run, artifacts};
+}
+
+export async function saveRun(run: SavedRun): Promise<SavedRun> {
   const db = await open();
   try {
-    await new Promise<void>((resolve, reject) => {
+    return await new Promise<SavedRun>((resolve, reject) => {
       const tx = db.transaction("runs", "readwrite");
       const records = tx.objectStore("runs");
       const existing = records.get(run.id);
+      let snapshot = run;
       existing.onsuccess = () => {
         const saved = existing.result as SavedRun | undefined;
         // Another tab may already have saved a longer prefix or final outcome.
-        if (saved && (saved.lastSequence > run.lastSequence ||
-            (saved.lastSequence === run.lastSequence && terminal(saved.status) && !terminal(run.status)))) return;
-        try { records.put(run); }
+        const newer = saved && (saved.lastSequence > run.lastSequence ||
+          (saved.lastSequence === run.lastSequence && terminal(saved.status) && !terminal(run.status)));
+        snapshot = newer ? retainArtifactBytes(saved, run) : retainArtifactBytes(run, saved);
+        try { records.put(snapshot); }
         catch (error) { tx.abort(); reject(error); }
       };
-      tx.oncomplete = () => resolve();
+      tx.oncomplete = () => resolve(snapshot);
       tx.onabort = () => reject(tx.error || new Error("Storage write aborted"));
       tx.onerror = () => reject(tx.error);
     });
@@ -128,6 +138,44 @@ export function createSavedRun(
     lastSequence: 0,
   };
 }
+async function downloadArtifact(url: string, secret: string): Promise<Blob> {
+  const target = new URL(url, window.location.origin);
+  if (target.origin !== window.location.origin)
+    throw Error("Artifact URL must use the application proxy");
+  const response = await fetch(target, {
+    headers: { Authorization: `Bearer ${secret}` },
+    cache: "no-store",
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw Error(`Artifact unavailable (${response.status})`);
+  return response.blob();
+}
+
+function artifactSources(event: Audit) {
+  return [...(event.payload.artifacts || []), ...(event.payload.patient?.artifacts || [])];
+}
+
+/** Derive a stable authenticated endpoint from the saved event, including older records. */
+function artifactEndpoint(run: SavedRun, artifact: SavedArtifact) {
+  if (!run.secret || artifact.blob) return;
+  const delimiter = artifact.id.lastIndexOf(":");
+  const index = Number(artifact.id.slice(delimiter + 1));
+  const event = run.events.find(item => item.id === artifact.id.slice(0, delimiter));
+  if (event?.run_id !== run.id || !Number.isSafeInteger(index) || !artifactSources(event)[index]) return;
+  return `/api/runs/${encodeURIComponent(run.id)}/artifacts/${event.sequence}/${index}`;
+}
+
+export function canRecoverArtifact(run: SavedRun, artifact: SavedArtifact) {
+  return Boolean(artifactEndpoint(run, artifact));
+}
+
+export async function recoverArtifact(run: SavedRun, artifact: SavedArtifact): Promise<SavedArtifact> {
+  const endpoint = artifactEndpoint(run, artifact);
+  if (!endpoint) return artifact;
+  const blob = await downloadArtifact(endpoint, run.secret);
+  return {...artifact, blob, error: undefined};
+}
+
 /** Capture bytes now; saved records never depend on an engine path or temporary URL. */
 export async function captureEvent(
   run: SavedRun,
@@ -137,10 +185,7 @@ export async function captureEvent(
   const artifacts: SavedArtifact[] = [];
   const stage = event.payload.stage || "unknown";
   const patient = event.payload.patient;
-  const sources = [
-    ...(event.payload.artifacts || []),
-    ...(patient?.artifacts || []),
-  ];
+  const sources = artifactSources(event);
   for (const [index, source] of sources.entries()) {
     const { data_base64, url, path, ...metadata } = source;
     const artifact: SavedArtifact = {
@@ -159,16 +204,7 @@ export async function captureEvent(
         );
         artifact.blob = new Blob([bytes], { type: artifact.mediaType });
       } else if (url) {
-        const target = new URL(url, window.location.origin);
-        if (target.origin !== window.location.origin)
-          throw Error("Artifact URL must use the application proxy");
-        const response = await fetch(target, {
-          headers: { Authorization: `Bearer ${run.secret}` },
-          signal: AbortSignal.timeout(15000),
-        });
-        if (!response.ok)
-          throw Error(`Artifact unavailable (${response.status})`);
-        artifact.blob = await response.blob();
+        artifact.blob = await downloadArtifact(url, run.secret);
       } else throw Error("Artifact bytes were not supplied by the engine");
     } catch (e) {
       artifact.error =

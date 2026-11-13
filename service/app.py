@@ -11,13 +11,13 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from datetime import datetime, timezone
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from .catalog import patients, model_metadata
+from .audit import append_event, last_sequence
 from .run_repository import RunRepository, Conflict
 
 tool_transport = ContextVar("tool_transport", default=None)
@@ -138,9 +138,6 @@ def valid_checkpoint_signature(body, secret, signature):
     legacy = hmac.new(os.environ['CHECKPOINT_SIGNING_KEY'].encode(),checkpoint_bytes(body) + b'\0' + secret.encode(),hashlib.sha256).hexdigest()
     return hmac.compare_digest(signature,checkpoint_signature(body,secret)) or hmac.compare_digest(signature,legacy)
 
-def last_sequence(run):
-    return run.get('sequence_base', 0) + len(run['events'])
-
 RETENTION_SECONDS = float(os.environ.get('RUN_RETENTION_SECONDS', '3600'))
 
 @asynccontextmanager
@@ -171,10 +168,7 @@ class Selection(BaseModel):
 def emit(run, kind, message, payload=None):
     if run['status'] == 'canceled' and kind != 'done':
         return
-    seq = last_sequence(run) + 1
-    run['events'].append({'id': f"{run['id']}:{seq}", 'run_id': run['id'],
-        'sequence': seq, 'timestamp': datetime.now(timezone.utc).isoformat(),
-        'kind': kind, 'message': message, 'payload': payload or {}})
+    append_event(run, kind, message, payload)
     run['touched'] = time.monotonic()
     repo = repository()
     if repo:
@@ -410,8 +404,7 @@ async def approve_run(run_id: str, approval: Approval, authorization: str = Head
             return {'id':run_id,'status':run['status']}
         if run['status'] != 'waiting_approval':
             raise HTTPException(409,'Run is not waiting for approval')
-        rows = [{'patient_id':r['patient_id'],'feature_schema':checkpoint['feature_schema'],'feature_version':checkpoint['feature_version'],
-                 'values':dict(zip(checkpoint['feature_schema'],r['values']))} for r in checkpoint['feature_rows']]
+        rows = checkpoint_rows(checkpoint)
         try:
             if os.environ.get('EXECUTION_BACKEND') == 'modal':
                 if checkpoint['model_version'] != run['model']['model_version'] or checkpoint['feature_version'] != run['model']['feature_version']:

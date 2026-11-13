@@ -383,3 +383,98 @@ test("feature and survival stage values and data artifacts remain inspectable af
   expect(await readFile((await download[0].path())!, "utf8")).toBe("patient_id,sphericity\nLUNG1-001,0.72\n");
   await expect(results.getByText("Not run — no result saved")).toHaveCount(2);
 });
+
+test("Analysis keeps the saved run cohort when the next selection changes", async ({ page }) => {
+  await fixture(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Run analysis" }).click();
+  await expect(page.getByText("Saved in this browser", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Patients", exact: true }).click();
+  await page.getByRole("checkbox", { name: "Select LUNG1-001" }).uncheck();
+  await expect(page.getByText("0 selected", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Analysis", exact: true }).click();
+  await expect(page.locator(".run-summary")).toContainText("1 patients");
+  await expect(page.getByRole("img", { name: /LUNG1-001 tumor mask overlay/ })).toBeVisible();
+});
+
+test("missing authorized artifact bytes can be recovered without replaying the run", async ({ page }) => {
+  await fixture(page);
+  const overlayUrl = "/api/runs/fixture-1/artifacts/1/0";
+  const tableUrl = "/api/runs/fixture-1/artifacts/1/1";
+  let overlayRequests = 0;
+  let tableRequests = 0;
+  let replayRequests = 0;
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==", "base64");
+  await page.route(`**${overlayUrl}`, route => {
+    expect(route.request().headers().authorization).toBe("Bearer fixture-secret");
+    return ++overlayRequests < 3 ? route.fulfill({status: 503}) : route.fulfill({contentType: "image/png", body: png});
+  });
+  await page.route(`**${tableUrl}`, route => {
+    expect(route.request().headers().authorization).toBe("Bearer fixture-secret");
+    ++tableRequests;
+    return route.fulfill({contentType: "text/csv", body: "patient_id\nLUNG1-001\n"});
+  });
+  await page.route("**/api/runs/*/event-page?*", route => {
+    ++replayRequests;
+    return fulfill(route, {contentType: "text/event-stream", body: [
+      {kind: "tool_result", message: "Synthetic masks", payload: {
+        stage: "masks", patient: {patient_id: "LUNG1-001", status: "success", values: {volume_cm3: 12.5}, errors: [], artifacts: [
+          {role: "overlay", media_type: "image/png", url: overlayUrl},
+          {role: "summary", media_type: "text/csv", url: tableUrl},
+        ]},
+      }},
+      {kind: "done", message: "Synthetic complete", payload: {status: "completed"}},
+    ].map((event, i) => `data: ${JSON.stringify({...event, id: `fixture-1:${i + 1}`, run_id: "fixture-1", sequence: i + 1, timestamp: "2026-11-11T12:00:00Z"})}\n\n`).join("")});
+  });
+  await page.goto("/");
+  await page.getByRole("button", {name: "Run analysis"}).click();
+  await expect(page.getByText("Saved in this browser", {exact: true})).toBeVisible();
+  await expect(page.getByText("Missing artifact: overlay.", {exact: false})).toBeVisible();
+  await page.getByRole("button", {name: "Retry overlay download"}).click();
+  await expect(page.getByRole("button", {name: "Retry overlay download"})).toBeEnabled();
+  expect(overlayRequests).toBe(2);
+  await page.reload();
+  await page.getByRole("button", {name: "History", exact: true}).click();
+  await page.getByRole("button", {name: "Open run fixture-1"}).click();
+  const results = page.getByRole("region", {name: "Saved run results"});
+  await results.getByRole("button", {name: "Retry overlay download"}).click();
+  await expect(results.getByRole("img", {name: /LUNG1-001 tumor mask overlay/})).toHaveJSProperty("naturalWidth", 1);
+  await expect(results.getByRole("link", {name: "Open saved summary"})).toBeVisible();
+  await expect(page.locator(".timeline .event")).toHaveCount(2);
+  await page.reload();
+  await page.getByRole("button", {name: "History", exact: true}).click();
+  await page.getByRole("button", {name: "Open run fixture-1"}).click();
+  await expect(results.getByRole("img", {name: /LUNG1-001 tumor mask overlay/})).toHaveJSProperty("naturalWidth", 1);
+  expect([overlayRequests, tableRequests, replayRequests]).toEqual([3, 1, 1]);
+});
+
+test("History shows interrupted scoring and the status of each disclosed gate", async ({ page }) => {
+  await fixture(page, "failed");
+  const report = {
+    scoring_eligible_count: 1, evaluation_eligible_count: 0,
+    dispositions: [{patient_id: "LUNG1-001", scoring_eligible: true, evaluation_eligible: false, reasons: [{message: "Missing outcome"}]}],
+  };
+  await page.route("**/api/runs/*/event-page?*", route => fulfill(route, {
+    contentType: "text/event-stream",
+    body: [
+      {kind: "gate", message: "First disclosure", payload: {status: "waiting_approval", report, checkpoint: {disclosure_id: "one", model_version: "fixture-model", eligibility: report}}},
+      {kind: "gate", message: "Revised disclosure", payload: {status: "waiting_approval", report, checkpoint: {disclosure_id: "two", model_version: "fixture-model", eligibility: report}}},
+      {kind: "decision", message: "Approval for revised disclosure", payload: {action: "approve", status: "running", disclosure_id: "two", model_version: "fixture-model", report}},
+      {kind: "tool_call", message: "Frozen model scoring", payload: {stage: "score"}},
+      {kind: "gate", message: "Third disclosure", payload: {status: "waiting_approval", report, checkpoint: {disclosure_id: "three", model_version: "fixture-model", eligibility: report}}},
+      {kind: "done", message: "Synthetic failure", payload: {status: "failed"}},
+    ].map((event, i) => `data: ${JSON.stringify({...event, id: `fixture-1:${i + 1}`, run_id: "fixture-1", sequence: i + 1, timestamp: "2026-11-11T12:00:00Z"})}\n\n`).join(""),
+  }));
+  await page.goto("/");
+  await page.getByRole("button", {name: "Run analysis"}).click();
+  await expect(page.getByText("Saved in this browser", {exact: true})).toBeVisible();
+  await page.getByRole("button", {name: "History", exact: true}).click();
+  await page.getByRole("button", {name: "Open run fixture-1"}).click();
+  const results = page.getByRole("region", {name: "Saved run results"});
+  const disclosures = results.getByRole("region", {name: "Recorded exclusion approval"});
+  await expect(disclosures.nth(0)).toContainText("Superseded before approval");
+  await expect(disclosures.nth(1)).toContainText("Approval recorded");
+  await expect(disclosures.nth(2)).toContainText("Run ended before approval");
+  await expect(results.getByRole("heading", {name: "survival", exact: true})).toHaveCount(0);
+  await expect(results.getByRole("article").filter({has: page.getByRole("heading", {name: "score", exact: true})})).toContainText("Unfinished — no result saved");
+});

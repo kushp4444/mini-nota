@@ -105,7 +105,10 @@ async def _reconcile_one(repo, provider, intent):
             repo.interrupt(intent)
         # Known submitted calls are never automatically resubmitted.
         return
-    if intent['status'] != 'pending' or not repo.dispatch_due(intent['id']):
+    if intent['status'] != 'pending':
+        return
+    if not repo.dispatch_due(intent['id']):
+        repo.interrupt(intent, unconfirmed_dispatch=True)
         return
     submission_id = str(uuid.uuid4())
     repo.register_submission(intent['id'], submission_id, ambiguous=True)

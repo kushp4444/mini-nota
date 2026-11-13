@@ -9,13 +9,16 @@ import hashlib
 import hmac
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 
 import psycopg
 from psycopg.types.json import Jsonb
 
+from .audit import append_event
+
 TERMINAL = {'completed', 'failed', 'canceled'}
+DISPATCH_ATTEMPTS = 3
+DISPATCH_BACKOFF_SECONDS = 30
 
 
 class Conflict(Exception):
@@ -98,6 +101,11 @@ class RunRepository:
         This never claims compute ownership or clears an existing owner.
         """
         with psycopg.connect(self.database_url, connect_timeout=10) as conn:
+            conn.execute(
+                """SELECT r.id FROM visitor_runs r JOIN execution_operations o ON o.run_id=r.id
+                   WHERE o.id=%s FOR UPDATE OF r""",
+                (operation_id,),
+            )
             conn.execute('INSERT INTO operation_submissions(operation_id,submission_id,provider_call_id,ambiguous) VALUES (%s,%s,%s,%s) ON CONFLICT (operation_id,submission_id) DO UPDATE SET provider_call_id=COALESCE(EXCLUDED.provider_call_id,operation_submissions.provider_call_id),ambiguous=EXCLUDED.ambiguous',
                          (operation_id,submission_id,provider_call_id,ambiguous))
             conn.execute("UPDATE execution_operations SET submission_state=%s WHERE id=%s AND status='pending'", ('ambiguous' if ambiguous else 'submitted',operation_id))
@@ -155,16 +163,7 @@ class RunRepository:
                 identities = [patient['patient_id'] for patient in results]
                 if len(identities) != len(set(identities)) or not set(identities) <= set(document['patient_ids']):
                     raise Conflict('Stage results must account for distinct selected patients')
-            old_events = old[0].get('events',[])
-            events = document.get('events',[])
-            if events[:len(old_events)] != old_events:
-                raise Conflict('Audit history cannot be rewritten')
-            for offset,event in enumerate(events[len(old_events):],1):
-                expected = document.get('sequence_base',0) + len(old_events) + offset
-                if event.get('sequence') != expected or event.get('run_id') != run['id'] or event.get('id') != f"{run['id']}:{expected}":
-                    raise Conflict('Audit events must be consecutive and run-owned')
-                conn.execute('INSERT INTO run_events(run_id,sequence,event) VALUES (%s,%s,%s)',(run['id'],event['sequence'],Jsonb(event)))
-            conn.execute('UPDATE visitor_runs SET document=%s,revision=revision+1,cancel_intent=cancel_intent OR %s WHERE id=%s', (Jsonb(document),cancel,run['id']))
+            self._save_snapshot(conn, document, old[0].get('events', []), cancel=cancel)
             if approve:
                 self._operation(conn,run['id'],'scoring',run['gate_generation'])
             if operation and document.get('events') and document['events'][-1]['kind'] in {'done','gate'}:
@@ -173,8 +172,23 @@ class RunRepository:
                 conn.execute("UPDATE execution_operations SET status='stopped' WHERE run_id=%s AND status IN ('pending','owned')",(run['id'],))
         run['_revision'] += 1
 
-    def interrupt(self, intent):
-        """Record an acknowledged provider stop and its terminal audit atomically."""
+    @staticmethod
+    def _save_snapshot(conn, document, old_events, *, cancel=False):
+        run_id = document['id']
+        events = document.get('events', [])
+        if events[:len(old_events)] != old_events:
+            raise Conflict('Audit history cannot be rewritten')
+        for offset, event in enumerate(events[len(old_events):], 1):
+            expected = document.get('sequence_base', 0) + len(old_events) + offset
+            if event.get('sequence') != expected or event.get('run_id') != run_id or event.get('id') != f'{run_id}:{expected}':
+                raise Conflict('Audit events must be consecutive and run-owned')
+            conn.execute('INSERT INTO run_events(run_id,sequence,event) VALUES (%s,%s,%s)',
+                         (run_id, expected, Jsonb(event)))
+        conn.execute('UPDATE visitor_runs SET document=%s,revision=revision+1,cancel_intent=cancel_intent OR %s WHERE id=%s',
+                     (Jsonb(document), cancel, run_id))
+
+    def interrupt(self, intent, *, unconfirmed_dispatch=False):
+        """Fence an interrupted operation and append its terminal audit atomically."""
         run_id = intent['run_id']
         with psycopg.connect(self.database_url, connect_timeout=10) as conn:
             old = conn.execute(
@@ -183,40 +197,37 @@ class RunRepository:
             ).fetchone()
             if old is None or old[1] or old[0]['status'] != 'running':
                 return
-            row = conn.execute(
-                """UPDATE execution_operations SET status='interrupted'
-                   WHERE id=%s AND run_id=%s AND status IN (%s, 'interrupted')
-                   AND owner IS NOT DISTINCT FROM %s AND fence=%s RETURNING id""",
-                (intent['id'], run_id, 'owned' if intent['owner'] else 'pending',
-                 intent['owner'], intent['fence']),
-            ).fetchone()
+            if unconfirmed_dispatch:
+                attempts, backed_off, accepted = self._dispatch_attempts(conn, intent['id'])
+                if accepted or attempts < DISPATCH_ATTEMPTS or not backed_off:
+                    return
+                row = conn.execute(
+                    """UPDATE execution_operations SET status='interrupted', fence=fence+1
+                       WHERE id=%s AND run_id=%s AND status='pending'
+                       AND owner IS NULL AND fence=%s RETURNING id""",
+                    (intent['id'], run_id, intent['fence']),
+                ).fetchone()
+                reason = 'Remote execution could not be confirmed after repeated dispatch attempts.'
+                message = 'Remote dispatch could not be confirmed; available results retained.'
+                code = 'remote_dispatch_unconfirmed'
+            else:
+                row = conn.execute(
+                    """UPDATE execution_operations SET status='interrupted'
+                       WHERE id=%s AND run_id=%s AND status IN (%s, 'interrupted')
+                       AND owner IS NOT DISTINCT FROM %s AND fence=%s RETURNING id""",
+                    (intent['id'], run_id, 'owned' if intent['owner'] else 'pending',
+                     intent['owner'], intent['fence']),
+                ).fetchone()
+                reason = 'Remote execution interrupted.'
+                message = 'Remote execution stopped before completion; available results retained.'
+                code = 'remote_execution_interrupted'
             if row is None:
                 return
             document = old[0]
-            sequence = document.get('sequence_base', 0) + len(document['events']) + 1
-            event = {
-                'id': f'{run_id}:{sequence}',
-                'run_id': run_id,
-                'sequence': sequence,
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'kind': 'done',
-                'message': 'Remote execution stopped before completion; available results retained.',
-                'payload': {
-                    'status': 'failed',
-                    'reason': 'Remote execution interrupted.',
-                    'code': 'remote_execution_interrupted',
-                },
-            }
+            old_events = document['events'][:]
             document['status'] = 'failed'
-            document['events'].append(event)
-            conn.execute(
-                'INSERT INTO run_events(run_id, sequence, event) VALUES (%s,%s,%s)',
-                (run_id, sequence, Jsonb(event)),
-            )
-            conn.execute(
-                'UPDATE visitor_runs SET document=%s, revision=revision+1 WHERE id=%s',
-                (Jsonb(document), run_id),
-            )
+            append_event(document, 'done', message, {'status': 'failed', 'reason': reason, 'code': code})
+            self._save_snapshot(conn, document, old_events)
 
     def reconcile_stopped(self, operation_id, owner, fence):
         """Record an owned invocation stop during cancellation, after provider acknowledgement.
@@ -243,12 +254,20 @@ class RunRepository:
             rows = conn.execute("SELECT id,owner,fence FROM execution_operations WHERE run_id=%s AND status='owned'",(run_id,)).fetchall()
             return [dict(zip(('id','owner','fence'),row)) for row in rows]
 
+    @staticmethod
+    def _dispatch_attempts(conn, operation_id):
+        return conn.execute(
+            """SELECT count(*), max(created_at) < now() - make_interval(secs => %s),
+                      bool_or(provider_call_id IS NOT NULL)
+               FROM operation_submissions WHERE operation_id=%s""",
+            (DISPATCH_BACKOFF_SECONDS, operation_id),
+        ).fetchone()
+
     def dispatch_due(self, operation_id):
-        # Bound unknown-acceptance retries, including repeated reconnect polls.
-        # No lease takeover: owned operations are excluded by the caller.
+        # Give unknown calls time to claim, including after the final attempt.
         with psycopg.connect(self.database_url, connect_timeout=10) as conn:
-            row = conn.execute("SELECT count(*), max(created_at) < now() - interval '30 seconds' FROM operation_submissions WHERE operation_id=%s",(operation_id,)).fetchone()
-            return row[0] == 0 or (row[0] < 3 and bool(row[1]))
+            attempts, backed_off, _ = self._dispatch_attempts(conn, operation_id)
+            return attempts == 0 or (attempts < DISPATCH_ATTEMPTS and bool(backed_off))
 
     def pending(self, limit=20, run_id=None):
         """Private dispatcher reconciliation input, NEVER a public run listing."""

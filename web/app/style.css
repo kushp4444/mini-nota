@@ -59,9 +59,6 @@ button:disabled {
   border-radius: 5px;
   font-size: 11px;
 }
-.workspace span {
-  float: right;
-}
 .nav-label {
   font-size: 9px;
   letter-spacing: 1.7px;
