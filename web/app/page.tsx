@@ -41,6 +41,7 @@ export default function Home() {
     [savedSelection, setSavedSelection] = useState<SavedRun>(),
     [storageError, setStorageError] = useState(""),
     [saved, setSaved] = useState(false),
+    [gateIdle, setGateIdle] = useState(false),
     [unfinished, setUnfinished] = useState<SavedRun>(),
     [browserBusy, setBrowserBusy] = useState(false),
     [recoveringHistory, setRecoveringHistory] = useState(true),
@@ -54,6 +55,20 @@ export default function Home() {
   }
   const connection = useRef<AbortController | undefined>(undefined);
   const activeRun = useRef<SavedRun | undefined>(undefined);
+  const persistedRun = useRef<SavedRun | undefined>(undefined);
+  const gateUpdates = useRef<BroadcastChannel | undefined>(undefined);
+  useEffect(() => {
+    const updates = new BroadcastChannel('mini-nota-gate-updates');
+    gateUpdates.current = updates;
+    updates.onmessage = ({data}) => {
+      const run = activeRun.current;
+      if (run?.status === 'waiting_approval' && data === run.id) void follow(run);
+    };
+    return () => {
+      updates.close();
+      gateUpdates.current = undefined;
+    };
+  }, []);
   useEffect(() => watchBrowserRun(() => {
     try { setBrowserBusy(Boolean(browserRun())); }
     catch { setBrowserBusy(true); setError('Browser storage is unavailable; runs cannot be safely coordinated across tabs.'); }
@@ -64,6 +79,7 @@ export default function Home() {
         setHistory(runs.filter((run) => terminal(run.status)));
         const pending = runs.find((run) => !terminal(run.status));
         if (pending) {
+          persistedRun.current = pending;
           setUnfinished(pending);
           setSelection(pending.patientIds);
           setView("Analysis");
@@ -78,20 +94,23 @@ export default function Home() {
     return () => connection.current?.abort();
   }, []);
   async function persist(run: SavedRun) {
-    if (activeRun.current?.id === run.id && terminal(activeRun.current.status) && !terminal(run.status)) return;
+    if (activeRun.current?.id === run.id && terminal(activeRun.current.status) && !terminal(run.status)) return false;
     activeRun.current = run;
     if (terminal(run.status)) { releaseBrowserRun(run.id); if (run.launchNonce) releaseBrowserRun(run.launchNonce); }
     setSaved(false);
     try {
       await saveRun(run);
+      persistedRun.current = run;
       if (run.launchNonce) attachBrowserRun(run.launchNonce, run.id);
       if (terminal(run.status)) releaseBrowserRun(run.id);
       setSaved(true);
       setStorageError("");
       if (terminal(run.status))
         setHistory((prev) => [run, ...prev.filter((r) => r.id !== run.id)]);
+      return true;
     } catch (e) {
       setStorageError(storageMessage(e));
+      return false;
     }
   }
   const displayedEvents =
@@ -135,17 +154,25 @@ export default function Home() {
     connection.current?.abort();
     const controller = new AbortController();
     connection.current = controller;
+    setGateIdle(false);
+    setError("");
     activeRun.current = run;
-    await reclaimBrowserRun(run.id);
-    await displayRun(run);
     try {
-      await reconnectRun(run, async next => {
-        await persist(next);
-        if (controller.signal.aborted) return;
+      await reclaimBrowserRun(run.id);
+      if (controller.signal.aborted) return;
+      await displayRun(run);
+      const outcome = await reconnectRun(run, persistedRun.current === run, async next => {
+        const stored = await persist(next);
+        if (controller.signal.aborted) return stored;
         await displayRun(next);
         setUnfinished(terminal(next.status) ? undefined : next);
         if (next.reason && next.status === "failed") setError(next.reason);
+        return stored;
       }, controller.signal);
+      if (!controller.signal.aborted && outcome === 'waiting_approval') {
+        setSaved(true);
+        setGateIdle(true);
+      }
     } catch (e) {
       if (controller.signal.aborted) return;
       setError((e instanceof Error ? e.message : "Connection unavailable") + ". Server work has not been canceled. Retry reconnection to collect available results.");
@@ -200,11 +227,18 @@ export default function Home() {
     }
   }
 
+  function refreshAfterControl(run: SavedRun) {
+    gateUpdates.current?.postMessage(run.id);
+    const current = activeRun.current;
+    if (current?.id === run.id && !terminal(current.status)) void follow(current);
+  }
+
   async function approveCurrent() {
     const run = activeRun.current;
     if (!run || run.status !== "waiting_approval") return;
     const checkpoint = run.checkpoint as {disclosure_id:string;model_version:string};
     const response = await fetch(`/api/runs/${run.id}/approve`, {method:"POST",headers:{Authorization:`Bearer ${run.secret}`,"Content-Type":"application/json"},body:JSON.stringify({disclosure_id:checkpoint.disclosure_id,model_version:checkpoint.model_version})});
+    refreshAfterControl(run);
     if (!response.ok) throw Error(response.status === 409 ? "The disclosed cohort changed. Review the updated patient report before approving." : "Approval was not confirmed. Retry when the service is available.");
   }
   async function cancelCurrent() {
@@ -212,9 +246,8 @@ export default function Home() {
     if (!run || terminal(run.status)) return;
     const headers = { Authorization: `Bearer ${run.secret}` };
     const response = await fetch(`/api/runs/${run.id}/cancel`, { method: 'POST', headers });
+    refreshAfterControl(run);
     if (!response.ok) throw Error('Cancellation was not confirmed. Please retry; processing may still be active.');
-    connection.current?.abort();
-    await follow(activeRun.current || run);
   }
   return (
     <div className="shell">
@@ -324,8 +357,11 @@ export default function Home() {
             </div>}
             {view !== "History" && unfinished && (
               <div role="status" className="card recovery-note">
-                Reconnecting saved run ({unfinished.id}) from event {unfinished.lastSequence}.
-                Closing this page does not cancel server work.
+                {gateIdle ? (
+                  <button onClick={() => follow(unfinished)}>Refresh run status</button>
+                ) : (
+                  <>Reconnecting saved run ({unfinished.id}) from event {unfinished.lastSequence}. Closing this page does not cancel server work.</>
+                )}
                 {status === "disconnected" && <button onClick={() => follow(unfinished)}>Retry reconnection</button>}
               </div>
             )}
