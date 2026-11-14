@@ -18,7 +18,13 @@ test("real held-out patient receives frozen model score and retains it in Histor
   await page.getByRole('button',{name:'Run analysis'}).click();
   const scores = page.getByLabel('Frozen model risk scores', {exact:true});
   await expect(scores.getByText('1 / 1 scored',{exact:true})).toBeVisible({timeout:90000});
-  await expect(scores.getByText(data.modelMetadata.model_version,{exact:true})).toBeVisible();
+  const finding = scores.getByText(new RegExp(`${id} scored as high as or higher than about .* of the patients the model learned from`));
+  await expect(finding).toBeVisible();
+  await expect(scores.getByText(/Reference percentile/)).toBeVisible();
+  const table = scores.getByRole("table", { name: "Patient risk scores", includeHidden: true });
+  await expect(table).toBeHidden();
+  await scores.getByText("View details", { exact: true }).click();
+  await expect(table.getByText(data.modelMetadata.model_version, { exact: true })).toBeVisible();
   await expect(page.getByText('Saved in this browser',{exact:true})).toBeVisible();
   await expect(page.getByLabel('Tumor masks',{exact:true}).getByRole('img')).toBeVisible();
   const saved = await page.evaluate(async () => {
@@ -39,9 +45,11 @@ test("real held-out patient receives frozen model score and retains it in Histor
   expect(scored.scores[0].risk_score).toBe(saved.events.find((e:any)=>e.payload.stage==='score'&&e.kind==='tool_result').payload.patient.values.risk_score);
   await page.getByRole('button',{name:'History',exact:true}).click();
   await page.getByRole('button',{name:`Open run ${saved.id}`,exact:true}).click();
-  await expect(page.getByRole('heading',{name:'Model risk scores',exact:true})).toBeVisible();
+  await expect(finding).toBeVisible();
+  await expect(table).toBeHidden();
   await page.reload();
   await page.getByRole('button',{name:'History',exact:true}).click();
   await page.getByRole('button',{name:`Open run ${saved.id}`,exact:true}).click();
-  await expect(page.getByRole('heading',{name:'Model risk scores',exact:true})).toBeVisible();
+  await expect(finding).toBeVisible();
+  await expect(table).toBeHidden();
 });

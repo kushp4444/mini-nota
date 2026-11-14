@@ -736,3 +736,28 @@ footer span {
   font-size: 0.8125rem;
   line-height: 1.5;
 }
+
+.results > .result-finding,
+.results > .result-caption,
+.patient-risk-findings {
+  margin-inline: 23px;
+}
+
+.results > .card-heading + .result-finding,
+.patient-risk-findings {
+  margin-top: 16px;
+}
+
+.result-details {
+  margin: 12px 23px 16px;
+}
+
+.patient-result .result-details {
+  margin-inline: 0;
+}
+
+.result-details > summary {
+  cursor: pointer;
+  color: #52675e;
+  font-weight: 600;
+}

@@ -1,18 +1,77 @@
-type Curve = {group:string;count:number;events:number;points:{time:number;survival:number}[]};
-export type Evaluation = {evaluation_version?:string;model_version?:string;scope?:string;c_index:number|null;evaluated_count:number;held_out_count?:number;event_count:number;censored_count:number;unavailable_reason?:string;time_unit:string;curves?:Curve[];curve_context?:string;exclusions:{patient_id:string;code:string;message:string}[];uncertainty:{context:string;method?:string;interval?:number[];estimable_samples?:number;unestimable_samples?:number;requested_samples?:number}};
+import { evaluationFinding, survivalCurveFinding } from "../lib/survivalFindings";
 
-export default function EvaluationResults({evaluation,full=false}:{evaluation?:Evaluation;full?:boolean}) {
-  return <section className="evaluation-result" aria-label={full?'Full held-out evaluation':'Selected cohort exploratory evaluation'}>
-    <h3>{full?'Full held-out evaluation':'Selected cohort · exploratory'}</h3>
-    {!evaluation ? <p>{full?'Full held-out evaluation is unavailable for the deployed model.':'Exploratory outcome evaluation appears after scoring.'}</p> : <>
-      <p><strong>{evaluation.c_index==null?'C-index unavailable':evaluation.c_index.toFixed(3)}</strong> {evaluation.c_index!=null&&'c-index'} · {evaluation.evaluated_count} evaluated · {evaluation.event_count} events · {evaluation.censored_count} censored</p>
-      {evaluation.unavailable_reason&&<p>{evaluation.unavailable_reason}</p>}
-      {full&&<><p>Fixed full held-out cohort; this result stays the same when your selection changes. Model {evaluation.model_version}.</p><p>Evaluation {evaluation.evaluation_version}</p></>}
-      {evaluation.uncertainty.interval&&<p>95% patient-bootstrap interval: {evaluation.uncertainty.interval[0].toFixed(3)}–{evaluation.uncertainty.interval[1].toFixed(3)}. {evaluation.uncertainty.estimable_samples} estimable / {evaluation.uncertainty.requested_samples} samples; {evaluation.uncertainty.unestimable_samples} unestimable.</p>}
-      <p>{evaluation.uncertainty.context} {full&&'Interval conditions on the frozen fitted model; it does not include uncertainty from model development.'}</p>
-      <p>Evaluation exclusions: {evaluation.exclusions.length}.{evaluation.exclusions.map(e=><span key={e.patient_id}> {e.patient_id}: {e.message}.</span>)}</p>
-      {!full&&<><p>{evaluation.curve_context}</p>{Boolean(evaluation.curves?.length)&&<SurvivalChart curves={evaluation.curves!} unit={evaluation.time_unit}/>}</>}
-      {full&&<details><summary>Evaluation method</summary><p>Harrell concordance: higher log-risk predicts shorter observed survival. Risk ties receive half credit; censored pairs follow lifelines admissibility rules. Concordance measures ordering among comparable outcomes, not a percentage of patients predicted correctly.</p><p>{evaluation.uncertainty.method}</p></details>}
+type Curve = {
+  group: string;
+  count: number;
+  events: number;
+  points: { time: number; survival: number }[];
+};
+export type Evaluation = {
+  evaluation_version?: string;
+  model_version?: string;
+  c_index: number | null;
+  evaluated_count: number;
+  event_count: number;
+  censored_count: number;
+  unavailable_reason?: string | null;
+  method?: string;
+  time_unit: string;
+  curves?: Curve[];
+  exclusions: { patient_id: string; code: string; message: string }[];
+  uncertainty?: {
+    context: string;
+    method?: string;
+    interval?: number[] | null;
+    estimable_samples?: number;
+    unestimable_samples?: number;
+    requested_samples?: number;
+  };
+};
+
+export default function EvaluationResults({ evaluation, full = false, ended = false }: {
+  evaluation?: Evaluation;
+  full?: boolean;
+  ended?: boolean;
+}) {
+  const interval = evaluation?.uncertainty?.interval;
+  const curves = evaluation?.curves ?? [];
+  return <section className="evaluation-result" aria-label={full ? "Full held-out evaluation" : "Selected cohort exploratory evaluation"}>
+    <h3>{full ? "Full held-out evaluation" : "Selected cohort · exploratory"}</h3>
+    {!evaluation ? <p className="result-finding">{full
+      ? "Full held-out evaluation is unavailable for the deployed model."
+      : ended ? "This run ended before exploratory evaluation was available."
+      : "Exploratory outcome evaluation appears after scoring."}</p> : <>
+      <p className="result-finding">{evaluationFinding(evaluation)}</p>
+      <p className="result-caption">
+        {evaluation.c_index == null ? "C-index unavailable" : `C-index ${evaluation.c_index.toFixed(3)}`}
+        {interval?.length === 2 && ` · 95% patient-bootstrap interval ${interval[0].toFixed(3)}–${interval[1].toFixed(3)}`}
+        {" · "}{evaluation.evaluated_count} patients evaluated · {evaluation.event_count} events · {evaluation.censored_count} censored
+      </p>
+      <p>{full
+        ? "The model was tested on the full group of patients set aside before development, regardless of your selection."
+        : "This exploratory result uses only selected patients with scores and usable outcomes."}</p>
+      <p>C-index measures how often higher model scores went with shorter observed survival among patient pairs whose outcomes can be ordered.</p>
+      {evaluation.exclusions.length > 0 && <div>
+        <h4>Excluded from evaluation</h4>
+        <ul>{evaluation.exclusions.map(e => <li key={e.patient_id}>{e.patient_id} · {e.message}</li>)}</ul>
+      </div>}
+      {!full && <>
+        <p>{survivalCurveFinding(curves)}</p>
+        {curves.length > 0 && <SurvivalChart curves={curves} unit={evaluation.time_unit} />}
+      </>}
+      <details>
+        <summary>View details</summary>
+        {evaluation.model_version && <p>Model {evaluation.model_version}</p>}
+        {evaluation.evaluation_version && <p>Evaluation {evaluation.evaluation_version}</p>}
+        <p>Harrell concordance gives tied scores half credit and applies lifelines rules to censored outcomes.</p>
+        {evaluation.uncertainty?.method && <p>{evaluation.uncertainty.method}</p>}
+        {evaluation.uncertainty?.requested_samples != null && <p>
+          {evaluation.uncertainty.estimable_samples} estimable / {evaluation.uncertainty.requested_samples} samples
+          {" · "}{evaluation.uncertainty.unestimable_samples} unestimable
+        </p>}
+        {evaluation.uncertainty?.context && <p>{evaluation.uncertainty.context}</p>}
+        {full && interval && <p>The interval measures uncertainty on the held-out cohort for the frozen fitted model.</p>}
+      </details>
     </>}
   </section>;
 }
@@ -26,5 +85,5 @@ function SurvivalChart({curves,unit}:{curves:Curve[];unit:string}) {
     {[0,.5,1].map(t=><text key={t} x={x(t*max)} y="239" textAnchor="middle" fontSize="12">{Math.round(t*max)}</text>)}
     <text x="300" y="265" textAnchor="middle" fontSize="13">Recorded follow-up ({unit})</text><text x="55" y="25" fontSize="13">Observed survival</text>
     {curves.map(c=>{let d=`M${x(0)} ${y(1)}`;for(const p of c.points)d+=` H${x(p.time)} V${y(p.survival)}`;return <path key={c.group} d={d} stroke={c.group==='higher model risk'?'#dc6b30':'#267f91'} strokeWidth="2.5" fill="none"/>;})}
-  </svg><ul>{curves.map(c=><li key={c.group} style={{color:c.group==='higher model risk'?'#a94716':'#186778'}}>{c.group} · n={c.count}, {c.events} events</li>)}</ul><p>Observed outcomes within relative model groups, using the fixed development median. These are not clinical risk categories or predicted survival probabilities. Curves are unadjusted exploratory summaries; no curve separation is assumed.</p></>;
+  </svg><ul>{curves.map(c=><li key={c.group} style={{color:c.group==='higher model risk'?'#a94716':'#186778'}}>{c.group} · n={c.count}, {c.events} events</li>)}</ul><p>The chart summarizes observed survival using groups defined by the median score of the patients the model learned from.</p></>;
 }

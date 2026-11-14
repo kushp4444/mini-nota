@@ -44,7 +44,7 @@ test('confirmation dismisses safely; cancellation retains results and enables a 
   const api = await fixture(context);
   await page.goto('/');
   await page.getByRole('button',{name:'Run analysis'}).click();
-  await expect(page.getByText('Synthetic verified grid')).toBeVisible();
+  await expect(page.getByText('1 patient passed scan checks and could continue to mask construction.')).toBeVisible();
   const other = await context.newPage();
   await other.goto('/');
   await other.getByRole('button',{name:'Patients',exact:true}).click();
@@ -100,7 +100,7 @@ test('lost creation response reloads the same launch and can cancel it without d
  await expect(page.getByRole('button',{name:'Retry launch recovery'})).toBeVisible();
  expect(api.launches()).toBe(1);
  await page.reload();
- await expect(page.getByText('Synthetic verified grid')).toBeVisible();
+ await expect(page.getByText('1 patient passed scan checks and could continue to mask construction.')).toBeVisible();
  expect(api.launches()).toBe(1);
  await page.getByRole('button',{name:'Cancel run',exact:true}).click();
  await page.getByRole('button',{name:'Confirm cancellation'}).click();

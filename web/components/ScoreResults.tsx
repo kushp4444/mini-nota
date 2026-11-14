@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import EvaluationResults, { type Evaluation } from "./EvaluationResults";
 import type { Audit } from "../lib/history";
+import { riskFinding } from "../lib/survivalFindings";
 
 export function HeldOutBenchmark({events}:{events:Audit[]}) {
   const [full,setFull] = useState<Evaluation>();
@@ -10,21 +11,76 @@ export function HeldOutBenchmark({events}:{events:Audit[]}) {
   return <EvaluationResults evaluation={baseline} full />;
 }
 
-export default function ScoreResults({ selectedIds, events, showBenchmark=true }: { selectedIds: string[]; events: Audit[]; showBenchmark?:boolean }) {
-  const exploratory = events.find(e=>e.kind==='tool_result'&&e.payload.stage==='evaluation')?.payload.evaluation;
-  const scores = events.filter(e => e.kind === "tool_result" && e.payload.stage === "score").map(e => e.payload.patient);
+type PatientScore = {
+  patient_id: string;
+  values: {
+    risk_score?: number;
+    risk_percentile?: number | null;
+    risk_group?: string;
+    model_version?: string;
+  };
+};
+
+function modelRiskGroup(group?: string) {
+  if (group === "higher model risk") return "Higher model risk (above the median of the reference scores)";
+  if (group === "lower model risk") return "Lower model risk (at or below the median of the reference scores)";
+  return "Model-risk group unavailable";
+}
+
+export default function ScoreResults({ selectedIds, events, showBenchmark = true }: {
+  selectedIds: string[];
+  events: Audit[];
+  showBenchmark?: boolean;
+}) {
+  const exploratory = events.find(e => e.kind === "tool_result" && e.payload.stage === "evaluation")?.payload.evaluation;
+  const scores: PatientScore[] = events.filter(e => e.kind === "tool_result" && e.payload.stage === "score")
+    .map(e => e.payload.patient).filter(Boolean);
+  const scoresById = new Map(scores.map(score => [score.patient_id, score.values]));
   const report = events.find(e => e.payload.stage === "eligibility" && e.payload.report)?.payload.report;
-  const stopped = events.find(e => e.kind === "done" && e.payload.status === "failed");
+  const stopped = events.find(e => e.kind === "done" && ["failed", "canceled"].includes(e.payload.status));
   return <section className="card results score-results" aria-label="Frozen model risk scores">
-    <div className="card-heading"><div><h2>Model risk scores</h2><p>Relative model ranking · not survival probability or predicted lifespan</p></div><span>{scores.length} / {selectedIds.length} scored</span></div>
-    {report?.model && <p className="model-context">Model {report.model.model_version} · Fixed development reference: {report.model.reference_count} patients · fixed median {report.model.reference_median?.toPrecision(6)}.</p>}
+    <div className="card-heading">
+      <h2>Model risk scores</h2>
+      <span>{scores.length} / {selectedIds.length} scored</span>
+    </div>
     {stopped && <p className="model-context" role="status">{stopped.message}</p>}
     {showBenchmark && <HeldOutBenchmark events={events} />}
-    {!scores.length ? <p>No risk scores yet. Eligible patients receive results after imaging and any required approval.</p> : <div className="score-table" tabIndex={0} role="region" aria-label="Scrollable patient risk scores"><table aria-label="Patient risk scores"><thead><tr><th>Patient</th><th>Risk score (log relative hazard)</th><th>Development percentile</th><th>Fixed model-risk group</th><th>Model version</th></tr></thead><tbody>{selectedIds.map(id => {
-      const score = scores.find(p => p.patient_id === id);
-      return <tr key={id}><td>{id}</td><td>{score ? score.values.risk_score.toPrecision(8) : "Not scored"}</td><td>{score?.values.risk_percentile != null ? `${score.values.risk_percentile.toFixed(1)}th` : "—"}</td><td>{score?.values.risk_group || "—"}</td><td>{score?.values.model_version || "—"}</td></tr>;
-    })}</tbody></table></div>}
-    <p>Percentile is 100 × the fraction of frozen development-reference scores at or below this score. Ties receive the upper empirical rank. Higher model risk is strictly above the development median; at or below is lower model risk. These fixed relative rankings are not probabilities of death, lifespan estimates, or clinical risk categories.</p>
-    <EvaluationResults evaluation={exploratory} />
+    {scores.length ? <>
+      <div className="patient-risk-findings">
+      {scores.map(({ patient_id, values }) => <div key={patient_id}>
+        <p className="result-finding">{riskFinding(patient_id, values.risk_percentile)}</p>
+        <p className="result-caption">
+          {values.risk_percentile != null ? `Reference percentile ${values.risk_percentile.toFixed(1)} · ` : ""}
+          {modelRiskGroup(values.risk_group)}
+        </p>
+      </div>)}
+      </div>
+      <details className="result-details">
+        <summary>View details</summary>
+        {report?.model && <p className="model-context">
+          Model {report.model.model_version} · Fixed development reference {report.model.reference_count} patients
+          {report.model.reference_median != null && ` · Median score ${report.model.reference_median.toPrecision(6)}`}
+        </p>}
+        <div className="score-table" tabIndex={0} role="region" aria-label="Scrollable patient risk scores">
+          <table aria-label="Patient risk scores">
+            <thead><tr><th>Patient</th><th>Risk score (log relative hazard)</th><th>Development percentile</th><th>Fixed model-risk group</th><th>Model version</th></tr></thead>
+            <tbody>{selectedIds.map(id => {
+              const values = scoresById.get(id);
+              return <tr key={id}>
+                <td>{id}</td>
+                <td>{values ? values.risk_score?.toPrecision(8) ?? "—" : "Not scored"}</td>
+                <td>{values?.risk_percentile != null ? values.risk_percentile.toFixed(1) : "—"}</td>
+                <td>{values?.risk_group || "—"}</td>
+                <td>{values?.model_version || "—"}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+        </div>
+        <p>Percentiles count reference scores at or below each patient’s score, including ties. The higher group contains scores above the middle score of the patients the model learned from. These results describe rank. They cannot predict how long a patient will live.</p>
+      </details>
+    </> : <p className="result-finding">{stopped
+      ? "This run ended before a risk score was available."
+      : "Eligible patients receive risk scores after imaging and any required approval."}</p>}
+    <EvaluationResults evaluation={exploratory} ended={Boolean(stopped)} />
   </section>;
 }
