@@ -722,3 +722,17 @@ footer span {
 .agent { position: sticky; top: 20px; }
 @media (max-width: 1100px) { .agent { position: static; } }
 .saved-stage { max-height: 360px; overflow: auto; }
+
+.result-finding {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.result-caption {
+  margin: 0 0 12px;
+  color: #52675e;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}

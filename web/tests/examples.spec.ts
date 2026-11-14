@@ -7,7 +7,12 @@ test('curated execution is immediately inspectable without launching a visitor r
   await page.getByRole('button', {name:'View completed example', exact:true}).click();
   await expect(page.getByText('Curated success · actual execution', {exact:true})).toBeVisible();
   await expect(page.getByRole('region', {name:'Saved run results'})).toBeVisible();
-  await expect(page.getByRole('table', {name:'Patient risk scores'})).toBeVisible();
+  const results = page.getByRole('region', {name:'Saved run results'});
+  await expect(results.getByText(/in the one comparable pair.*higher model score had longer observed survival/i)).toBeVisible();
+  const scoreTable = results.getByRole('table', {name:'Patient risk scores', includeHidden:true});
+  await expect(scoreTable).toBeHidden();
+  await results.locator('details').filter({has: scoreTable}).getByText('View details', {exact:true}).click();
+  await expect(scoreTable).toBeVisible();
   await expect(page.getByText('Not a medical device or medical advice.', {exact:false})).toBeVisible();
   await expect(page.getByRole('img', {name:'LUNG1-002 tumor mask overlay on middle tumor-bearing CT slice'})).toBeVisible();
   await page.getByRole('button', {name:'Inspect LUNG1-009',exact:true}).click();
