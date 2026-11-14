@@ -504,7 +504,7 @@ test("the same ranking finding and score details are available after reopening a
 
   const scores = page.getByRole("region", {name: "Frozen model risk scores"});
   await expect(scores.getByText(finding)).toBeVisible();
-  await expect(scores.getByText(/78(?:\.0)?(?:th)? percentile/)).toBeVisible();
+  await expect(scores.getByText(/Reference percentile 78/)).toBeVisible();
   const table = scores.getByRole("table", {name: "Patient risk scores", includeHidden: true});
   await expect(table).toBeHidden();
   await scores.locator("details").filter({has: table}).getByText("View details", {exact: true}).click();
