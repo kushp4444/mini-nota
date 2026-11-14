@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import EvaluationResults from "./EvaluationResults";
 import FeatureResults from "./FeatureResults";
 import ScoreResults, { HeldOutBenchmark } from "./ScoreResults";
 import QCResults from "./QCResults";
@@ -76,6 +77,9 @@ export default function History({
 }) {
   const [detailsOpen,setDetailsOpen] = useState(false);
   const retained = usePatientResults(selected);
+  const hasResult = (...stages: string[]) => selected?.events.some(
+    event => event.kind === "tool_result" && stages.includes(event.payload.stage),
+  );
   const gates = selected?.events.filter(event => event.kind === "gate" && event.payload.report) ?? [];
   useEffect(() => setDetailsOpen(false), [selected?.id]);
   return (
@@ -128,7 +132,9 @@ export default function History({
           <HeldOutBenchmark events={selected.events} />
           <QCResults selectedIds={selected.patientIds} results={retained.qc||[]} ended />
           <MaskResults selectedIds={selected.patientIds} results={retained.masks||[]} qcResults={retained.qc||[]} ended />
-          {selected.events.some(e=>e.kind==="tool_result"&&e.payload.stage==="score") && <ScoreResults selectedIds={selected.patientIds} events={selected.events} showBenchmark={false} />}
+          {hasResult("score", "evaluation")
+            ? <ScoreResults selectedIds={selected.patientIds} events={selected.events} showBenchmark={false} />
+            : !hasResult("survival") && <EvaluationResults ended />}
           {selected.events.some(e => e.kind === "tool_result" && e.payload.stage === "features") && <FeatureResults selectedIds={selected.patientIds}
             results={retained.features||[]}
             qcResults={retained.qc||[]}

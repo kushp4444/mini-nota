@@ -35,6 +35,7 @@ export default function EvaluationResults({ evaluation, full = false, ended = fa
 }) {
   const interval = evaluation?.uncertainty?.interval;
   const curves = evaluation?.curves ?? [];
+  const exclusions = evaluation?.exclusions ?? [];
   return <section className="evaluation-result" aria-label={full ? "Full held-out evaluation" : "Selected cohort exploratory evaluation"}>
     <h3>{full ? "Full held-out evaluation" : "Selected cohort · exploratory"}</h3>
     {!evaluation ? <p className="result-finding">{full
@@ -51,9 +52,9 @@ export default function EvaluationResults({ evaluation, full = false, ended = fa
         ? "The model was tested on the full group of patients set aside before development, regardless of your selection."
         : "This exploratory result uses only selected patients with scores and usable outcomes."}</p>
       <p>C-index measures how often higher model scores went with shorter observed survival among patient pairs whose outcomes can be ordered.</p>
-      {evaluation.exclusions.length > 0 && <div>
+      {exclusions.length > 0 && <div>
         <h4>Excluded from evaluation</h4>
-        <ul>{evaluation.exclusions.map(e => <li key={e.patient_id}>{e.patient_id} · {e.message}</li>)}</ul>
+        <ul>{exclusions.map(e => <li key={e.patient_id}>{e.patient_id} · {e.message}</li>)}</ul>
       </div>}
       {!full && <>
         <p>{survivalCurveFinding(curves)}</p>

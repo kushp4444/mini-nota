@@ -372,7 +372,7 @@ test("feature and survival stage values and data artifacts remain inspectable af
   await page.getByRole("button", {name: /Open run fixture-1/}).click();
   const results = page.getByRole("region", {name: "Saved run results"});
   await results.getByText("Structured stage details",{exact:true}).click();
-  await expect(results.getByText(/original_shape_Sphericity/)).toContainText("0.72");
+  await expect(results.locator("pre").filter({hasText: "original_shape_Sphericity"})).toContainText("0.72");
   await expect(results.getByText(/synthetic-v1/)).toContainText("63.2");
   await expect(results.getByText(/synthetic-v1/)).toContainText("No comparable pairs");
   const download = await Promise.all([
@@ -486,7 +486,7 @@ test("the same ranking finding and score details are available after reopening a
     body: [
       {kind: "tool_result", message: "Synthetic risk score", payload: {
         stage: "score", patient: {patient_id: "LUNG1-001", status: "success", values: {
-          risk_score: 0.42, risk_percentile: 78, risk_group: "higher", model_version: "fixture-model",
+          risk_score: 0.42, risk_percentile: 78, risk_group: "higher model risk", model_version: "fixture-model",
         }},
       }},
       {kind: "done", message: "Synthetic run complete", payload: {status: "completed"}},
@@ -507,6 +507,6 @@ test("the same ranking finding and score details are available after reopening a
   await expect(scores.getByText(/Reference percentile 78/)).toBeVisible();
   const table = scores.getByRole("table", {name: "Patient risk scores", includeHidden: true});
   await expect(table).toBeHidden();
-  await scores.locator("details").filter({has: table}).getByText("View details", {exact: true}).click();
+  await scores.locator(":scope > details > summary").click();
   await expect(table).toContainText("fixture-model");
 });

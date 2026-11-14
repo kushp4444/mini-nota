@@ -31,7 +31,7 @@ test('fixed held-out evaluation stays visible beside a one-patient exploratory r
   await expect(fullCaption).toBeVisible();
   await expect(selected.getByText(/The model’s risk rankings couldn’t be compared with observed survival/)).toBeVisible();
   await expect(selected.getByText(/C-index unavailable/)).toBeVisible();
-  await page.getByLabel('Frozen model risk scores', { exact: true }).getByText('View details', { exact: true }).first().click();
+  await page.getByLabel('Frozen model risk scores', { exact: true }).locator(":scope > details > summary").click();
   const row=page.getByRole('table',{name:'Patient risk scores'}).getByRole('row').nth(1);
   await expect(row).toContainText('higher model risk');
   await expect(row).toContainText(metadata.model_version);

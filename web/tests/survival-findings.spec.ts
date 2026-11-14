@@ -27,8 +27,13 @@ test("an interval touching 0.5 is inconclusive", () => {
 });
 
 test("a single comparable pair describes the observed order against the ranking", () => {
-  expect(evaluationFinding({ c_index: 0, evaluated_count: 2 }))
+  expect(evaluationFinding({ c_index: 0, evaluated_count: 2, event_count: 2 }))
     .toBe("In the one comparable pair, the patient with the higher model score had longer observed survival.");
+});
+
+test("a single pair with an incomplete outcome describes the observed event", () => {
+  expect(evaluationFinding({ c_index: 0, evaluated_count: 2, event_count: 1 }))
+    .toBe("In the one comparable pair, the patient with the lower model score was the one with a recorded death.");
 });
 
 test("an unavailable comparison explains the effect and preserves the recorded reason", () => {

@@ -23,7 +23,7 @@ test("real held-out patient receives frozen model score and retains it in Histor
   await expect(scores.getByText(/Reference percentile/)).toBeVisible();
   const table = scores.getByRole("table", { name: "Patient risk scores", includeHidden: true });
   await expect(table).toBeHidden();
-  await scores.getByText("View details", { exact: true }).click();
+  await scores.locator(":scope > details > summary").click();
   await expect(table.getByText(data.modelMetadata.model_version, { exact: true })).toBeVisible();
   await expect(page.getByText('Saved in this browser',{exact:true})).toBeVisible();
   await expect(page.getByLabel('Tumor masks',{exact:true}).getByRole('img')).toBeVisible();

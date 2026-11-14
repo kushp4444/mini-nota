@@ -4,6 +4,10 @@ import type { MaskPatientResult } from "./MaskResults";
 
 export type FeaturePatientResult = MaskPatientResult & { feature_schema?: string[] };
 
+function measurementNames(result: FeaturePatientResult) {
+  return result.feature_schema?.length ? result.feature_schema : Object.keys(result.values);
+}
+
 /** Works on live or retained results; all downloads use locally owned bytes. */
 export default function FeatureResults({selectedIds, results, qcResults, maskResults,ended=false}: {
   selectedIds: string[];
@@ -15,9 +19,9 @@ export default function FeatureResults({selectedIds, results, qcResults, maskRes
   const [chosen, setChosen] = useState("");
   const successful = results.filter(result => result.status === "success");
   const failed = results.filter(result => result.status !== "success");
-  const schema = [...new Set(successful.flatMap(result => result.feature_schema?.length ? result.feature_schema : Object.keys(result.values)))];
+  const schema = [...new Set(successful.flatMap(measurementNames))];
   const matchingMeasurementCounts = schema.length && successful.every(result =>
-    (result.feature_schema?.length || Object.keys(result.values).length) === schema.length
+    measurementNames(result).length === schema.length
   );
   const finding = successful.length
     ? "Feature extraction measured tumor shape, image intensity, and texture."
@@ -74,7 +78,7 @@ export default function FeatureResults({selectedIds, results, qcResults, maskRes
       </div>
       <p className={detail?.status === "failed" ? "error-text" : "muted"}>{disposition(selected)}</p>
       {detail?.status === "success" ? <dl className="feature-values">
-        {(detail.feature_schema?.length ? detail.feature_schema : Object.keys(detail.values)).map(name => <div key={name}><dt>{name}</dt><dd title={String(detail.values[name])}>{numeric(detail.values[name])}</dd></div>)}
+        {measurementNames(detail).map(name => <div key={name}><dt>{name}</dt><dd title={String(detail.values[name])}>{numeric(detail.values[name])}</dd></div>)}
       </dl> : null}
     </div> : <p className="muted">Start a run to inspect radiomic measurements.</p>}
     </details> : null}

@@ -7,7 +7,7 @@ test('full held-out library keeps Run visible and the benchmark near the cohort'
   await expect(page.getByRole('button',{name:'Run analysis'})).toBeInViewport();
   await page.getByRole('button',{name:'Analysis',exact:true}).click();
   const benchmark=page.getByLabel('Full held-out evaluation',{exact:true});
-  await expect(benchmark.getByText('0.606',{exact:true})).toBeVisible();
+  await expect(benchmark.getByText(/C-index 0\.606/)).toBeVisible();
   expect((await benchmark.boundingBox())!.y).toBeLessThan(850);
   await expect(page.getByText('Waiting for mask construction after scan checks…')).toHaveCount(0);
 });

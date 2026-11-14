@@ -1,6 +1,7 @@
 type Concordance = {
   c_index: number | null;
   evaluated_count: number;
+  event_count?: number;
   unavailable_reason?: string | null;
   uncertainty?: { interval?: number[] | null };
 };
@@ -13,14 +14,19 @@ export function evaluationFinding(evaluation: Concordance): string {
   }
 
   // Two evaluated patients and a defined C-index establish exactly one comparable pair.
-  if (evaluated_count === 2 && c_index === 0) {
-    return "In the one comparable pair, the patient with the higher model score had longer observed survival.";
-  }
-  if (evaluated_count === 2 && c_index === 1) {
-    return "In the one comparable pair, the patient with the higher model score had shorter observed survival.";
-  }
-  if (evaluated_count === 2 && c_index === 0.5) {
-    return "In the one comparable pair, both patients received the same model score.";
+  if (evaluated_count === 2) {
+    if (c_index === 0.5) return "In the one comparable pair, both patients received the same model score.";
+    if (c_index === 0 || c_index === 1) {
+      const direction = c_index === 0 ? "longer" : "shorter";
+      if (evaluation.event_count === 2) {
+        return `In the one comparable pair, the patient with the higher model score had ${direction} observed survival.`;
+      }
+      if (evaluation.event_count === 1) {
+        const ranking = c_index === 0 ? "lower" : "higher";
+        return `In the one comparable pair, the patient with the ${ranking} model score was the one with a recorded death.`;
+      }
+      return "Only one patient pair could be compared.";
+    }
   }
   const interval = evaluation.uncertainty?.interval;
   if (interval && interval[0] > 0.5) return "Higher model scores generally went with shorter observed survival.";

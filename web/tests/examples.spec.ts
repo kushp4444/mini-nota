@@ -9,9 +9,10 @@ test('curated execution is immediately inspectable without launching a visitor r
   await expect(page.getByRole('region', {name:'Saved run results'})).toBeVisible();
   const results = page.getByRole('region', {name:'Saved run results'});
   await expect(results.getByText(/in the one comparable pair.*higher model score had longer observed survival/i)).toBeVisible();
-  const scoreTable = results.getByRole('table', {name:'Patient risk scores', includeHidden:true});
+  const scoring = results.getByRole('region', {name:'Frozen model risk scores'});
+  const scoreTable = scoring.getByRole('table', {name:'Patient risk scores', includeHidden:true});
   await expect(scoreTable).toBeHidden();
-  await results.locator('details').filter({has: scoreTable}).getByText('View details', {exact:true}).click();
+  await scoring.locator(':scope > details > summary').click();
   await expect(scoreTable).toBeVisible();
   await expect(page.getByText('Not a medical device or medical advice.', {exact:false})).toBeVisible();
   const masks = page.getByRole('region', {name:'Tumor masks'});
