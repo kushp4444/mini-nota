@@ -478,3 +478,35 @@ test("History shows interrupted scoring and the status of each disclosed gate", 
   await expect(results.getByRole("heading", {name: "survival", exact: true})).toHaveCount(0);
   await expect(results.getByRole("article").filter({has: page.getByRole("heading", {name: "score", exact: true})})).toContainText("Unfinished — no result saved");
 });
+
+test("the same ranking finding and score details are available after reopening a run", async ({ page }) => {
+  await fixture(page);
+  await page.route("**/api/runs/*/event-page?*", route => fulfill(route, {
+    contentType: "text/event-stream",
+    body: [
+      {kind: "tool_result", message: "Synthetic risk score", payload: {
+        stage: "score", patient: {patient_id: "LUNG1-001", status: "success", values: {
+          risk_score: 0.42, risk_percentile: 78, risk_group: "higher", model_version: "fixture-model",
+        }},
+      }},
+      {kind: "done", message: "Synthetic run complete", payload: {status: "completed"}},
+    ].map((event, i) => `data: ${JSON.stringify({...event, id: `fixture-1:${i + 1}`, run_id: "fixture-1", sequence: i + 1, timestamp: "2026-11-11T12:00:00Z"})}\n\n`).join(""),
+  }));
+  const finding = /LUNG1-001 scored as high as or higher than about 78%/;
+  await page.goto("/");
+  await page.getByRole("button", {name: "Run analysis"}).click();
+  await expect(page.getByText("Saved in this browser", {exact: true})).toBeVisible();
+  await expect(page.getByText(finding)).toBeVisible();
+  await page.route("**/api/runs/**", route => route.abort());
+  await page.reload();
+  await page.getByRole("button", {name: "History", exact: true}).click();
+  await page.getByRole("button", {name: "Open run fixture-1"}).click();
+
+  const scores = page.getByRole("region", {name: "Frozen model risk scores"});
+  await expect(scores.getByText(finding)).toBeVisible();
+  await expect(scores.getByText(/78(?:\.0)?(?:th)? percentile/)).toBeVisible();
+  const table = scores.getByRole("table", {name: "Patient risk scores", includeHidden: true});
+  await expect(table).toBeHidden();
+  await scores.locator("details").filter({has: table}).getByText("View details", {exact: true}).click();
+  await expect(table).toContainText("fixture-model");
+});
