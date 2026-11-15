@@ -260,56 +260,49 @@ export default function Home() {
   }
   return (
     <div className="shell">
-      <aside className="nav">
+      <aside className="nav" aria-label="Workspace">
         <div className="brand">
-          <span className="mark">△</span>
           <div>
-            Mini-Nota<small>IMAGING WORKSPACE</small>
+            Mini-Nota<small>Imaging workspace</small>
           </div>
         </div>
         <div className="workspace">
           Lung1 demonstration
         </div>
-        <div className="nav-label">WORKSPACE</div>
-        {[
-          ["Patients", "▦"],
-          ["Analysis", "▥"],
-          ["History", "◷"],
-          ["Examples", "◇"],
-        ].map(([name, icon]) => (
-          <button
-            key={name}
-            className={view === name ? "active" : ""}
-            onClick={() => setView(name)}
-          >
-            <span aria-hidden="true">{icon}</span>
-            {name}
-          </button>
-        ))}
+        <nav aria-label="Main navigation">
+          {["Patients", "Analysis", "History", "Examples"].map((name) => (
+            <button
+              key={name}
+              className={view === name ? "active" : ""}
+              aria-current={view === name ? "page" : undefined}
+              onClick={() => setView(name)}
+            >
+              {name === "History" ? "Run history" : name}
+            </button>
+          ))}
+        </nav>
         <div className="nav-bottom">
-          <span className="avatar">MN</span>
           <div>
-            Public research data<small>DEMONSTRATION ONLY</small>
+            Public research data<small>Demonstration only</small>
           </div>
         </div>
       </aside>
       <div className="content">
         <header>
-          <span>▥</span> {view}
+          <span>{view === "History" ? "Run history" : view}</span>
           <div className="header-right">
-            <i /> Public Lung1 · {catalog.some((p) => p.fixture) ? "fixture library" : "held-out library"}
+            Public Lung1 · {catalog.some((p) => p.fixture) ? "fixture library" : "held-out library"}
           </div>
         </header>
         <div className="disclaimer">
           Public de-identified Lung1 data · Demonstration only · Not a medical
           device or medical advice.
         </div>
-        <main>
-          <section className="center">
+        <main id="main-content">
+          <section className="center" aria-labelledby="page-heading">
             <div className="page-title">
               <div>
-                <div className="eyebrow">IMAGING ANALYSIS</div>
-                <h1>
+                <h1 id="page-heading">
                   {view === "Patients"
                     ? "Patient library"
                     : view === "Analysis"
@@ -322,10 +315,10 @@ export default function Home() {
                     : "An auditable view of your imaging workflow."}
                 </p>
               </div>
-              <span className="tag">{catalog.some((p) => p.fixture) ? "DEVELOPMENT FIXTURE" : "FROZEN HELD-OUT LIBRARY"}</span>
+              <span className="tag">{catalog.some((p) => p.fixture) ? "Development fixture" : "Frozen held-out library"}</span>
             </div>
             <div className="card example-launch">
-              <div><h2>Explore an actual execution</h2><p>Immediate, read-only product examples. Visitor runs appear separately in browser-local History.</p></div>
+              <div><h2>Read a completed run</h2><p>Inspect the findings and recorded decisions. Your own runs are saved separately in this browser’s Run history.</p></div>
               <button className="primary" onClick={() => openExample("success")}>View completed example</button>
               <button className="example-secondary" onClick={() => openExample("failure")}>View failure example</button>
             </div>
@@ -416,23 +409,22 @@ export default function Home() {
                         : `${catalog.length} frozen held-out patients · excluded from model development`}
                     </p>
                   </div>
-                  <span>{selection.length} selected</span>
                 </div>
                 <div className="table-footer">
-                  <span>{catalog.length} available patients</span>
+                  <span role="status">{selection.length} of {catalog.length} patients selected</span>
                   <button
                     className="primary"
                     disabled={recoveringHistory || !selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}
                     onClick={start}
                   >
-                    Run analysis <span>→</span>
+                    Run analysis
                   </button>
                 </div>
                 <div className="catalog-scroll" tabIndex={0} role="region" aria-label="Held-out patient selection">
                 <table>
                   <thead>
                     <tr>
-                      <th>
+                      <th scope="col">
                         <input
                           aria-label="Select all patients"
                           type="checkbox"
@@ -447,14 +439,14 @@ export default function Home() {
                           }
                         />
                       </th>
-                      <th>Patient ID</th>
-                      <th>Collection</th>
-                      <th>Catalog context</th>
+                      <th scope="col">Patient ID</th>
+                      <th scope="col">Collection</th>
+                      <th scope="col">Catalog context</th>
                     </tr>
                   </thead>
                   <tbody>
                     {catalog.map((p) => (
-                      <tr key={p.id}>
+                      <tr key={p.id} className={selection.includes(p.id) ? "selected" : undefined}>
                         <td>
                           <input
                             aria-label={`Select ${p.id}`}
@@ -486,7 +478,6 @@ export default function Home() {
             ) : (
               <>
                 <div className="card run-summary">
-                  <div className="run-icon">▥</div>
                   <div>
                     <small>Selected cohort</small>
                     <strong>
@@ -498,7 +489,7 @@ export default function Home() {
                   </span>
                 </div>
                 <HeldOutBenchmark events={events} />
-                {!events.length && <div className="card stage-empty"><p>Start a run to see real patient checks arrive here.</p><button className="primary" onClick={start} disabled={recoveringHistory || !selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}>Run analysis →</button></div>}
+                {!events.length && <div className="card stage-empty"><p>Start a run to see real patient checks arrive here.</p><button className="primary" onClick={start} disabled={recoveringHistory || !selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}>Run analysis</button></div>}
                 <QCResults selectedIds={analysisIds} results={results} ended={terminal(status)} />
                 <MaskResults selectedIds={analysisIds} results={masks} qcResults={results} ended={terminal(status)} />
                 <FeatureResults selectedIds={analysisIds} results={features} qcResults={results} maskResults={masks} ended={terminal(status)} />
@@ -507,19 +498,15 @@ export default function Home() {
               </>
             )}
           </section>
-          <aside className="agent card">
+          <aside className="agent card" aria-labelledby="agent-heading">
             <div className="agent-heading">
-              <span className="agent-mark">✳</span>
               <div>
-                <h2>Workflow agent</h2>
-                <p>Transparent by design</p>
+                <h2 id="agent-heading">Agent panel</h2>
+                <p>Plan, results and recorded decisions</p>
               </div>
-              <span className="live-dot" />
             </div>
             <div className="agent-intro">
-              A fixed plan. Real tools.
-              <br />
-              Every result, in order.
+              Follow the four stages and inspect each event in the run record.
             </div>
             <div className="stage-list">
               <span className={status === "running" ? "stage-running" : ""}>
@@ -536,11 +523,11 @@ export default function Home() {
             </div>
             <div className="stage-list"><span>03</span><div><strong>Radiomic features</strong><small>Real quantitative measurements</small></div></div>
             <div className="stage-list"><span>04</span><div><strong>Frozen model scoring</strong><small>Fixed development model · no live fitting</small></div></div>
-            <div className="timeline">
+            <div className="timeline" role="region" aria-label="Run events">
               {displayedEvents.length ? (
                 displayedEvents.map((e) => (
                   <div key={e.id} className={`event ${e.kind}`}>
-                    <span className="event-dot" />
+                    <span className="event-dot" aria-hidden="true" />
                     <div>
                       <small>
                         {e.sequence.toString().padStart(2, "0")} ·{" "}

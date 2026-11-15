@@ -1,0 +1,2 @@
+render tier: 5 screenshots in /private/tmp/mini-nota-insight-integration/mockups/almanac/.hallmark/shots (1280x800, 1440x900, 1920x1080 folds; 1440 and 375 full pages)
+sloplint: clean. 0 FAIL, 0 REFLEX, 0 WARN across 2 file(s).

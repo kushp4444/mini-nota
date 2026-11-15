@@ -47,13 +47,13 @@ test("real features arrive progressively with patient detail and a portable CSV"
   await page.getByLabel('Select LUNG1-002', {exact:true}).check();
   await page.getByRole('button', {name:'Run analysis'}).click();
   const features = page.getByLabel('Radiomic features', {exact:true});
-  await expect(features.getByText('Feature extraction measured tumor shape, image intensity, and texture.')).toBeVisible({timeout:60000});
+  await expect(features.getByText('We measured the tumors’ shape, CT intensity, and patterns in the scan.')).toBeVisible({timeout:60000});
   await expect(features.getByText('1 patient with measurements · 72 measurements per patient')).toBeVisible();
   await features.getByText('View details', {exact:true}).click();
   await expect(features.getByRole('table', {name:'Feature measurements'})).toBeVisible();
   await features.getByRole('button', {name:'Inspect LUNG1-002'}).click();
   await expect(features.getByRole('heading', {name:'LUNG1-002 feature details'})).toBeVisible();
-  await expect(features.getByText('original_shape_VoxelVolume', {exact:true})).toHaveCount(2);
+  await expect(features.getByText('Tumor volume from the mask (mm³)', {exact:true})).toHaveCount(2);
   await expect(features.getByRole('link', {name:'Download LUNG1-002 features CSV'})).toHaveAttribute('href', /^data:text\/csv;base64,/);
   await expect(page.getByLabel('Tumor masks', {exact:true}).getByRole('img')).toBeVisible();
 });

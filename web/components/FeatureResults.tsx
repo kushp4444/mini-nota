@@ -1,5 +1,7 @@
 "use client";
 import { useState } from "react";
+import { featureLabel } from "../lib/featureLabels";
+import FeatureMeasurementLabel from "./FeatureMeasurementLabel";
 import type { MaskPatientResult } from "./MaskResults";
 
 export type FeaturePatientResult = MaskPatientResult & { feature_schema?: string[] };
@@ -24,27 +26,27 @@ export default function FeatureResults({selectedIds, results, qcResults, maskRes
     measurementNames(result).length === schema.length
   );
   const finding = successful.length
-    ? "Feature extraction measured tumor shape, image intensity, and texture."
+    ? "We measured the tumors’ shape, CT intensity, and patterns in the scan."
     : failed.length
-      ? "Feature extraction did not produce measurements."
+      ? "We couldn’t measure the tumors from these scans."
       : ended
         ? "No feature measurements were saved before the run ended."
-        : "Feature extraction measures tumor shape, image intensity, and texture after masks are created.";
+        : "Once we outline the tumors, we’ll measure their shape, CT intensity, and patterns in the scan.";
   const selected = selectedIds.includes(chosen) ? chosen : selectedIds[0];
   const detail = results.find(r => r.patient_id === selected);
   function disposition(id: string) {
     const patient = results.find(r => r.patient_id === id);
     if (patient) return patient.status === "success" ? "Ready" : patient.errors.map(e => e.message).join("; ") || "Extraction failed";
-    if (qcResults.some(r => r.patient_id === id && r.status !== "success")) return "Excluded by QC";
-    if (maskResults.some(r => r.patient_id === id && r.status !== "success")) return "Excluded by mask failure";
-    return ended ? "No feature result saved before the run ended" : "Waiting for feature extraction";
+    if (qcResults.some(r => r.patient_id === id && r.status !== "success")) return "Did not pass scan checks";
+    if (maskResults.some(r => r.patient_id === id && r.status !== "success")) return "No tumor outline was available";
+    return ended ? "No feature result saved before the run ended" : "Waiting for tumor measurements";
   }
   function numeric(value: unknown) {
     return typeof value === "number" && Number.isFinite(value) ? value.toPrecision(8) : "Unavailable";
   }
   const csv = detail?.artifacts?.find(a => a.media_type === "text/csv" && a.data_base64);
   return <section className="card results feature-results" aria-label="Radiomic features">
-    <div className="card-heading"><h2>Radiomic features</h2></div>
+    <div className="card-heading"><h2>Tumor measurements from the CT scan</h2></div>
     <p className="result-finding">{finding}</p>
     {!!results.length && <p className="result-caption">
       {successful.length} {successful.length === 1 ? "patient" : "patients"} with measurements
@@ -59,9 +61,10 @@ export default function FeatureResults({selectedIds, results, qcResults, maskRes
     </div>}
     {(results.length || qcResults.length || maskResults.length) ? <details className="result-details">
     <summary>View details</summary>
+    <p className="result-caption">These numbers describe what the tumor looks like on the scan. CT intensity describes how light or dark each point is after the scan values are put on a common scale. Texture describes how those values vary from place to place.</p>
     <div className="feature-scroll" tabIndex={0} role="region" aria-label="Scrollable feature measurements">
       <table aria-label="Feature measurements">
-        <thead><tr><th>Patient</th><th>Disposition</th>{schema.map(name => <th key={name}>{name}</th>)}</tr></thead>
+        <thead><tr><th>Patient</th><th>Result</th>{schema.map(name => <th key={name}>{featureLabel(name)}</th>)}</tr></thead>
         <tbody>{selectedIds.map(id => {
           const patient = results.find(r => r.patient_id === id);
           return <tr key={id} aria-selected={selected === id}>
@@ -78,9 +81,9 @@ export default function FeatureResults({selectedIds, results, qcResults, maskRes
       </div>
       <p className={detail?.status === "failed" ? "error-text" : "muted"}>{disposition(selected)}</p>
       {detail?.status === "success" ? <dl className="feature-values">
-        {measurementNames(detail).map(name => <div key={name}><dt>{name}</dt><dd title={String(detail.values[name])}>{numeric(detail.values[name])}</dd></div>)}
+        {measurementNames(detail).map(name => <div key={name}><dt><FeatureMeasurementLabel name={name} /></dt><dd title={String(detail.values[name])}>{numeric(detail.values[name])}</dd></div>)}
       </dl> : null}
-    </div> : <p className="muted">Start a run to inspect radiomic measurements.</p>}
+    </div> : <p className="muted">Start a run to see tumor measurements.</p>}
     </details> : null}
   </section>;
 }

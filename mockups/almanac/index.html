@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="A concise review of a completed Mini-Nota imaging run."><title>Mini-Nota Almanac mockup</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><a class="brand" href="#results">Mini-Nota</a><nav aria-label="Preview sections"><a href="#results">Results</a><a href="#scans">Scans</a><a href="#measurements">Measurements</a><a href="#record">Run record</a></nav><span class="preview">Design preview</span></header>
+<main>
+<div class="run-heading"><div><h1>Completed example</h1><p>2 patients. One completed run.</p></div><a class="button" href="#record">View run record</a></div>
+<section id="results" class="sheet">
+<div class="section-title"><h2>What happened?</h2><span>Selected patients</span></div>
+<div class="finding"><h3>The higher-ranked patient lived longer.</h3><p>The model got this pair’s order backward.</p></div>
+<div class="result-grid">
+<div>
+<svg viewBox="0 0 600 290" role="img" aria-label="Survival fell from 100 percent to 50 percent at day 131 and to zero at day 155">
+<text x="54" y="25">Patients still alive</text>
+<path class="grid" d="M54 50H554 M54 140H554 M54 230H554"/>
+<text x="44" y="54" text-anchor="end">100%</text><text x="44" y="144" text-anchor="end">50%</text><text x="44" y="234" text-anchor="end">0%</text>
+<path class="curve" d="M54 50H476.58V140H554V230"/>
+<path class="guide" d="M476.58 140V239 M554 140V239"/>
+<text x="54" y="254" text-anchor="middle">0</text><text x="476.58" y="254" text-anchor="middle">131</text><text x="554" y="254" text-anchor="middle">155</text>
+<text x="304" y="282" text-anchor="middle">Days of follow-up</text>
+</svg>
+<p class="caption">Both patients were in the higher-score group.</p>
+</div>
+<div class="patient-list">
+<article><h3>LUNG1-002</h3><div class="patient-numbers"><span><b>96</b>th percentile</span><span><b>155</b> days</span></div></article>
+<article><h3>LUNG1-009</h3><div class="patient-numbers"><span><b>68</b>th percentile</span><span><b>131</b> days</span></div></article>
+<p class="caption">Percentiles compare scores with the patients the model learned from.</p>
+</div>
+</div>
+<details><summary>How to read this result</summary><p>We compare these two patients with each other. Higher scores predict earlier deaths. Here, the higher-ranked patient died later. Two patients are too few to judge the model overall.</p><p class="caption">C-index 0.000. Two recorded deaths.</p></details>
+</section>
+<section class="benchmark"><div><h2>Across the test group</h2><p>Higher-ranked patients tended to die sooner.</p></div><details><summary>82 patients. View evidence</summary><p>C-index 0.606. The 95% confidence interval is 0.533 to 0.674. These patients were reserved before model development.</p></details></section>
+<section id="scans" class="sheet"><div class="section-title"><h2>Scans</h2><span>2 passed</span></div><div class="scan-grid"><figure><img src="lung1-002.png" alt="LUNG1-002 CT slice with tumor outline"><figcaption>LUNG1-002 <span>368.707 cm³</span></figcaption></figure><figure><img src="lung1-009.png" alt="LUNG1-009 CT slice with tumor outline"><figcaption>LUNG1-009 <span>103.771 cm³</span></figcaption></figure></div><details><summary>Scan checks</summary><p>Both scans passed the geometry, slice-spacing, and anonymization checks. The orange overlay marks the tumor.</p></details></section>
+<section id="measurements" class="sheet"><div class="section-title"><h2>Tumor measurements</h2><span>72 per patient</span></div><p class="caption">Shape, intensity, and texture.</p><details><summary>Inspect measurements</summary><div class="table-scroll"><table><thead><tr><th>Patient</th><th>Low CT intensity</th><th>High CT intensity</th></tr></thead><tbody><tr><th>LUNG1-002</th><td>0.64683153</td><td>1.9647864</td></tr><tr><th>LUNG1-009</th><td>0.97327069</td><td>1.6958013</td></tr></tbody></table></div><div class="measurement"><span>Low CT intensity <small>(normalized intensity)</small><span class="info"><button aria-label="About low CT intensity" aria-describedby="low-info">i</button><span role="tooltip" id="low-info">The 10th percentile. About one in ten tumor points have an intensity at or below this value.</span></span></span></div><p class="caption">Preview shows two of the 72 recorded measurements.</p></details></section>
+<section id="record"><h2>Run record</h2><details><summary>Completed stages</summary><ol><li>Scan checks passed</li><li>Tumor masks created</li><li>72 measurements extracted per patient</li><li>Risk scores calculated</li><li>Recorded survival compared</li></ol></details></section>
+</main>
+<footer><span>Public de-identified Lung1 data</span><p>Demonstration only. Not a medical device or medical advice.</p></footer>
+</body></html>

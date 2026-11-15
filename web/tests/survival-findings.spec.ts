@@ -3,50 +3,50 @@ import { evaluationFinding, riskFinding, survivalCurveFinding } from "../lib/sur
 
 test("an interval spanning 0.5 makes an above-0.5 estimate inconclusive", () => {
   expect(evaluationFinding({ c_index: 0.61, evaluated_count: 82, uncertainty: { interval: [0.48, 0.71] } }))
-    .toMatch(/don’t clearly show whether higher model scores went with shorter survival/);
+    .toMatch(/can’t tell from these results whether patients the model ranked higher died sooner/);
 });
 
 test("an interval above 0.5 supports concordance with shorter observed survival", () => {
   expect(evaluationFinding({ c_index: 0.61, evaluated_count: 82, uncertainty: { interval: [0.53, 0.67] } }))
-    .toBe("Higher model scores generally went with shorter observed survival.");
+    .toBe("Patients the model ranked higher tended to die sooner.");
 });
 
 test("an interval below 0.5 supports the reverse direction", () => {
   expect(evaluationFinding({ c_index: 0.39, evaluated_count: 82, uncertainty: { interval: [0.33, 0.47] } }))
-    .toBe("Higher model scores generally went with longer observed survival.");
+    .toBe("Patients the model ranked higher tended to live longer.");
 });
 
 test("several comparable patients without an interval get an explicitly uncertain finding", () => {
   expect(evaluationFinding({ c_index: 0.68, evaluated_count: 12, uncertainty: { interval: null } }))
-    .toBe("These results don’t clearly show whether higher model scores went with shorter survival.");
+    .toBe("We can’t tell from these results whether patients the model ranked higher died sooner.");
 });
 
 test("an interval touching 0.5 is inconclusive", () => {
   expect(evaluationFinding({ c_index: 0.61, evaluated_count: 82, uncertainty: { interval: [0.5, 0.67] } }))
-    .toMatch(/don’t clearly show/);
+    .toMatch(/can’t tell/);
 });
 
 test("a single comparable pair describes the observed order against the ranking", () => {
   expect(evaluationFinding({ c_index: 0, evaluated_count: 2, event_count: 2 }))
-    .toBe("In the one comparable pair, the patient with the higher model score had longer observed survival.");
+    .toBe("Of the two patients we could compare, the one the model ranked higher lived longer.");
 });
 
 test("a single pair with an incomplete outcome describes the observed event", () => {
   expect(evaluationFinding({ c_index: 0, evaluated_count: 2, event_count: 1 }))
-    .toBe("In the one comparable pair, the patient with the lower model score was the one with a recorded death.");
+    .toBe("Of the two patients we could compare, the one the model ranked lower was the only one with a recorded death.");
 });
 
-test("an unavailable comparison explains the effect and preserves the recorded reason", () => {
+test("an unavailable comparison explains why the ranking could not be checked", () => {
   expect(evaluationFinding({
     c_index: null,
     evaluated_count: 3,
     unavailable_reason: "No comparable outcome pairs (recorded events and follow-up do not permit concordance).",
-  })).toContain("No comparable outcome pairs (recorded events and follow-up do not permit concordance).");
+  })).toMatch(/records don’t tell us who lived longer/);
 });
 
 test("a single group explains why only one survival curve is shown", () => {
   expect(survivalCurveFinding([{ group: "higher model risk" }]))
-    .toBe("Only one model-risk group had usable outcomes, so the chart shows the higher model risk group.");
+    .toBe("We only had records for one group. There’s no lower-score group to compare it with.");
 });
 
 test("the percentile compares an individual with the fixed development reference", () => {

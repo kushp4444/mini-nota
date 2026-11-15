@@ -61,7 +61,7 @@ test("scan flags and feature failures remain visible when an interrupted run is 
     await expect(masks.getByText("Tumor volume: 12.5 cm³")).toBeVisible();
 
     const features = root.getByRole("region", { name: "Radiomic features" });
-    await expect(features.getByText("Feature extraction did not produce measurements.")).toBeVisible();
+    await expect(features.getByText("We couldn’t measure the tumors from these scans.")).toBeVisible();
     const failure = features.getByRole("article").filter({ hasText: patientIds[1] });
     await expect(failure.getByText("Could not calculate texture measurements")).toBeVisible();
   }
