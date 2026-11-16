@@ -391,7 +391,7 @@ test("Analysis keeps the saved run cohort when the next selection changes", asyn
   await expect(page.getByText("Saved in this browser", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Patients", exact: true }).click();
   await page.getByRole("checkbox", { name: "Select LUNG1-001" }).uncheck();
-  await expect(page.getByText("0 selected", { exact: true })).toBeVisible();
+  await expect(page.getByText("0 of 1 patients selected", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Analysis", exact: true }).click();
   await expect(page.locator(".run-summary")).toContainText("1 patients");
   await expect(page.getByRole("img", { name: /LUNG1-001 tumor mask overlay/ })).toBeVisible();
@@ -492,7 +492,7 @@ test("the same ranking finding and score details are available after reopening a
       {kind: "done", message: "Synthetic run complete", payload: {status: "completed"}},
     ].map((event, i) => `data: ${JSON.stringify({...event, id: `fixture-1:${i + 1}`, run_id: "fixture-1", sequence: i + 1, timestamp: "2026-11-11T12:00:00Z"})}\n\n`).join(""),
   }));
-  const finding = /LUNG1-001 scored as high as or higher than about 78%/;
+  const finding = /Reference percentile 78/;
   await page.goto("/");
   await page.getByRole("button", {name: "Run analysis"}).click();
   await expect(page.getByText("Saved in this browser", {exact: true})).toBeVisible();

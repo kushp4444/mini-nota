@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import EvaluationResults, { type Evaluation } from "./EvaluationResults";
 import type { Audit } from "../lib/history";
-import { riskFinding } from "../lib/survivalFindings";
 
 export function HeldOutBenchmark({events}:{events:Audit[]}) {
   const [full,setFull] = useState<Evaluation>();
@@ -32,13 +31,42 @@ export default function ScoreResults({ selectedIds, events, showBenchmark = true
   events: Audit[];
   showBenchmark?: boolean;
 }) {
-  const exploratory = events.find(e => e.kind === "tool_result" && e.payload.stage === "evaluation")?.payload.evaluation;
+  const exploratory: Evaluation | undefined = events.find(e => e.kind === "tool_result" && e.payload.stage === "evaluation")?.payload.evaluation;
   const scores: PatientScore[] = events.filter(e => e.kind === "tool_result" && e.payload.stage === "score")
     .map(e => e.payload.patient).filter(Boolean);
   const scoresById = new Map(scores.map(score => [score.patient_id, score.values]));
   const report = events.find(e => e.payload.stage === "eligibility" && e.payload.report)?.payload.report;
   const terminal = events.find(e => e.kind === "done");
   const stopped = terminal && ["failed", "canceled", "interrupted"].includes(terminal.payload.status);
+  const pairCurve = exploratory?.curves?.length === 1 ? exploratory.curves[0] : undefined;
+  const rankedPair = scores.filter(score => exploratory?.evaluated_patients?.includes(score.patient_id))
+    .sort((a, b) => (b.values.risk_score ?? 0) - (a.values.risk_score ?? 0));
+  const deathDays = pairCurve?.points.filter((point, index, points) =>
+    point.survival < (points[index - 1]?.survival ?? 1),
+  ).map(point => point.time) ?? [];
+  // With two recorded deaths and no ties, concordance identifies the earlier death.
+  const pairDays = new Map<string, number>();
+  if (exploratory?.evaluated_count === 2 && pairCurve?.count === 2 && pairCurve.events === 2 &&
+      rankedPair.length === 2 && rankedPair.every(score => Number.isFinite(score.values.risk_score)) &&
+      rankedPair[0].values.risk_score !== rankedPair[1].values.risk_score && deathDays.length === 2 &&
+      (exploratory.c_index === 0 || exploratory.c_index === 1)) {
+    const earlier = exploratory.c_index === 1 ? 0 : 1;
+    pairDays.set(rankedPair[earlier].patient_id, deathDays[0]);
+    pairDays.set(rankedPair[1 - earlier].patient_id, deathDays[1]);
+  }
+  const patientSummary = scores.length > 0 ? (
+      <div className="patient-risk-findings" tabIndex={0} role="region" aria-label="Patient score summary">
+        {scores.map(({ patient_id, values }) => <div key={patient_id}>
+          <h4>{patient_id}</h4>
+          {pairDays.has(patient_id) && <p className="patient-followup"><span>Recorded death at</span> {pairDays.get(patient_id)} {exploratory?.time_unit}</p>}
+          <p className="result-caption">
+            {values.risk_percentile != null ? `Reference percentile ${values.risk_percentile.toFixed(1)} · ` : ""}
+            {modelRiskGroup(values.risk_group)}
+          </p>
+        </div>)}
+        <p className="result-caption">Percentiles compare scores with the patients the model learned from.</p>
+      </div>
+  ) : undefined;
   return <section className="card results score-results" aria-label="Frozen model risk scores">
     <div className="card-heading">
       <h2>Model risk scores</h2>
@@ -46,16 +74,8 @@ export default function ScoreResults({ selectedIds, events, showBenchmark = true
     </div>
     {stopped && <p className="model-context" role="status">{terminal.message}</p>}
     {showBenchmark && <HeldOutBenchmark events={events} />}
+    <EvaluationResults evaluation={exploratory} ended={Boolean(terminal)} patientSummary={patientSummary} />
     {scores.length ? <>
-      <div className="patient-risk-findings">
-        {scores.map(({ patient_id, values }) => <div key={patient_id}>
-          <p className="result-finding">{riskFinding(patient_id, values.risk_percentile)}</p>
-          <p className="result-caption">
-            {values.risk_percentile != null ? `Reference percentile ${values.risk_percentile.toFixed(1)} · ` : ""}
-            {modelRiskGroup(values.risk_group)}
-          </p>
-        </div>)}
-      </div>
       <details className="result-details">
         <summary>View details</summary>
         {report?.model && <p className="model-context">
@@ -82,6 +102,5 @@ export default function ScoreResults({ selectedIds, events, showBenchmark = true
     </> : <p className="result-finding">{terminal
       ? "This run ended before a risk score was available."
       : "Eligible patients receive risk scores after imaging and any required approval."}</p>}
-    <EvaluationResults evaluation={exploratory} ended={Boolean(terminal)} />
   </section>;
 }

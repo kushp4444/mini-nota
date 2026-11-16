@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test('full held-out library keeps Run visible and the benchmark near the cohort',async({page})=>{
   await page.setViewportSize({width:1600,height:1000});
   await page.goto('/');
-  await expect(page.getByText('82 available patients')).toBeVisible();
+  await expect(page.getByText('82 frozen held-out patients')).toBeVisible();
   await expect(page.getByRole('button',{name:'Run analysis'})).toBeInViewport();
   await page.getByRole('button',{name:'Analysis',exact:true}).click();
   const benchmark=page.getByLabel('How the model did on its test group',{exact:true});

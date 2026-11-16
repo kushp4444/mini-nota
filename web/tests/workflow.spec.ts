@@ -4,7 +4,7 @@ test("select one real patient and render verified mask after QC", async ({
   page,
 }) => {
   await page.goto("/");
-  await expect(page.getByText("82 available patients")).toBeVisible();
+  await expect(page.getByText("82 frozen held-out patients")).toBeVisible();
   await page.getByLabel("Select all patients").uncheck();
   await expect(
     page.getByRole("button", { name: "Run analysis" }),
@@ -28,7 +28,7 @@ test("select one real patient and render verified mask after QC", async ({
 // Actual frozen held-out LUNG1-002; no three-patient fixture backend.
 test("mask overlay and physical measurements arrive as retained result bytes", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("82 available patients")).toBeVisible();
+  await expect(page.getByText("82 frozen held-out patients")).toBeVisible();
   await page.getByLabel("Select all patients").uncheck();
   await page.getByLabel("Select LUNG1-002", { exact: true }).check();
   await page.getByRole("button", {name:"Run analysis"}).click();
@@ -42,7 +42,7 @@ test("mask overlay and physical measurements arrive as retained result bytes", a
 
 test("real features arrive progressively with patient detail and a portable CSV", async ({page}) => {
   await page.goto('/');
-  await expect(page.getByText('82 available patients')).toBeVisible();
+  await expect(page.getByText('82 frozen held-out patients')).toBeVisible();
   await page.getByLabel('Select all patients').uncheck();
   await page.getByLabel('Select LUNG1-002', {exact:true}).check();
   await page.getByRole('button', {name:'Run analysis'}).click();

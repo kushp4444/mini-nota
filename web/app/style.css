@@ -925,3 +925,32 @@ tr.selected { background: var(--color-paper-2); }
 @media (max-width: 650px) {
   .nav > nav { width: 100%; }
 }
+.example-launch { gap: 12px; padding-block: 0 18px; margin-bottom: 22px; border-top: 0; }
+.saved-run > .evaluation-result { background: transparent; }
+.saved-run > .results { margin-inline: 24px; }
+.timeline { min-height: 0; }
+.event-dot { display: none; }
+.patient-risk-findings { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,14rem),1fr)); gap: 16px; }
+@media (max-width: 650px) {
+  .saved-run > .results { margin-inline: 12px; }
+}
+.survival-comparison {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: center;
+}
+.survival-comparison .patient-risk-findings { margin: 0; grid-template-columns: minmax(0, 1fr); }
+.patient-risk-findings h4 { margin-block: 0 6px; }
+.patient-risk-findings > div { border-top: 1px solid var(--color-rule); padding-block: 12px; }
+@media (max-width: 850px) {
+  .survival-comparison { grid-template-columns: minmax(0, 1fr); }
+}
+.patient-followup { font: 500 24px var(--font-outlier); margin: 6px 0; }
+.patient-followup span { display: block; font: 400 14px var(--font-body); color: var(--color-muted); }
+.run-stage-index { margin: 0; padding: 12px 0; list-style: none; }
+.run-stage-index li { border-bottom: 1px solid var(--color-rule); padding-block: 8px; }
+.agent > details { margin-top: 12px; }
+.patient-risk-findings > p { grid-column: 1 / -1; }
+.survival-comparison { align-items: start; }
+.patient-risk-findings { max-height: 28rem; overflow-y: auto; padding: 4px; }

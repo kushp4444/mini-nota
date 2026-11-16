@@ -125,16 +125,15 @@ export default function History({
           <div className="card-heading">
             <div>
               <h2>Saved run · {selected.status}</h2>
-              <p>{selected.reason || "No terminal reason was supplied."}</p>
-              <p>Read-only · engine is not rerun</p>
+              {selected.status !== "completed" && selected.reason && <p>{selected.reason}</p>}
             </div>
           </div>
-          <HeldOutBenchmark events={selected.events} />
-          <QCResults selectedIds={selected.patientIds} results={retained.qc||[]} ended />
-          <MaskResults selectedIds={selected.patientIds} results={retained.masks||[]} qcResults={retained.qc||[]} ended />
           {hasResult("score", "evaluation")
             ? <ScoreResults selectedIds={selected.patientIds} events={selected.events} showBenchmark={false} />
             : !hasResult("survival") && <EvaluationResults ended />}
+          <HeldOutBenchmark events={selected.events} />
+          <QCResults selectedIds={selected.patientIds} results={retained.qc||[]} ended />
+          <MaskResults selectedIds={selected.patientIds} results={retained.masks||[]} qcResults={retained.qc||[]} ended />
           {selected.events.some(e => e.kind === "tool_result" && e.payload.stage === "features") && <FeatureResults selectedIds={selected.patientIds}
             results={retained.features||[]}
             qcResults={retained.qc||[]}

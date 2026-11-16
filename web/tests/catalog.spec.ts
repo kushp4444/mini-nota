@@ -11,11 +11,10 @@ test("real held-out catalog labels and default selection follow the server", asy
   await page.goto("/");
   await expect(page.getByText("2 frozen held-out patients · excluded from model development", { exact: true })).toBeVisible();
   await expect(page.getByText("DEVELOPMENT FIXTURE", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("FROZEN HELD-OUT LIBRARY", { exact: true })).toBeVisible();
   const boxes = page.locator("tbody input[type=checkbox]");
   await expect(boxes).toHaveCount(2);
   await expect(boxes.nth(0)).toBeChecked();
   await expect(boxes.nth(1)).toBeChecked();
   await boxes.nth(0).uncheck();
-  await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
+  await expect(page.getByText("1 of 2 patients selected", { exact: true })).toBeVisible();
 });

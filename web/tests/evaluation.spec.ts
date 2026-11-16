@@ -7,7 +7,7 @@ test('fixed held-out evaluation stays visible beside a one-patient exploratory r
   expect(metadata?.evaluation.evaluated_count).toBe(82);
   expect(metadata.evaluation.c_index).toBeCloseTo(.6057961981925833,12);
   await page.goto('/');
-  await expect(page.getByText('82 available patients')).toBeVisible();
+  await expect(page.getByText('82 frozen held-out patients')).toBeVisible();
   await page.getByRole('button',{name:'Analysis',exact:true}).click();
   const full = page.getByLabel('How the model did on its test group', { exact: true });
   const fullFinding = full.getByText('Patients the model ranked higher tended to die sooner.', { exact: true });

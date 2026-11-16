@@ -11,6 +11,7 @@ export type Evaluation = {
   model_version?: string;
   c_index: number | null;
   evaluated_count: number;
+  evaluated_patients?: string[];
   event_count: number;
   censored_count: number;
   unavailable_reason?: string | null;
@@ -28,10 +29,11 @@ export type Evaluation = {
   };
 };
 
-export default function EvaluationResults({ evaluation, full = false, ended = false }: {
+export default function EvaluationResults({ evaluation, full = false, ended = false, patientSummary }: {
   evaluation?: Evaluation;
   full?: boolean;
   ended?: boolean;
+  patientSummary?: React.ReactNode;
 }) {
   const interval = evaluation?.uncertainty?.interval;
   const curves = evaluation?.curves ?? [];
@@ -41,26 +43,29 @@ export default function EvaluationResults({ evaluation, full = false, ended = fa
     {!evaluation ? <p className="result-finding">{full
       ? "There are no test results to show for this model."
       : ended ? "This run ended before we could check how the scores compared with what happened to the patients."
-      : "Once the patients are scored, we’ll check how the scores compare with their records."}</p> : <>
+      : "Waiting for scores and follow-up records."}</p> : <>
       <p className="result-finding">{evaluationFinding(evaluation)}</p>
       <p className="result-caption">
         {evaluation.c_index == null ? "C-index unavailable" : `C-index ${evaluation.c_index.toFixed(3)}`}
         {interval?.length === 2 && ` · 95% confidence interval ${interval[0].toFixed(3)}–${interval[1].toFixed(3)}`}
         {" · "}{evaluation.evaluated_count} {evaluation.evaluated_count === 1 ? "patient" : "patients"} with usable records · {evaluation.event_count} recorded {evaluation.event_count === 1 ? "death" : "deaths"} · {evaluation.censored_count} without a recorded death during follow-up
       </p>
-      <p>{full
-        ? "These patients were set aside before the model learned. Your selection doesn’t change this test."
-        : "The model scores each selected patient separately. We compare those patients with each other using their scores and follow-up records. The patients the model learned from are used to explain where each score ranks."}</p>
       {exclusions.length > 0 && <div>
         <h4>Whose records couldn’t be used</h4>
         <ul>{exclusions.map(e => <li key={e.patient_id}>{e.patient_id} · {e.message}</li>)}</ul>
       </div>}
-      {!full && <>
-        <p>{survivalCurveFinding(curves)}</p>
-        {curves.length > 0 && <SurvivalChart curves={curves} unit={evaluation.time_unit} />}
-      </>}
+      {!full && <div className="survival-comparison">
+        <div>
+          {curves.length > 0 && <SurvivalChart curves={curves} unit={evaluation.time_unit} />}
+          <p className="result-caption">{survivalCurveFinding(curves)}</p>
+        </div>
+        {patientSummary}
+      </div>}
       <details>
         <summary>View details</summary>
+      <p>{full
+        ? "These patients were set aside before the model learned. Your selection doesn’t change this test."
+        : "The model scores each selected patient separately. We compare those patients with each other using their scores and follow-up records. The patients the model learned from are used to explain where each score ranks."}</p>
         <p>C-index checks how often the model gave a higher score to the patient who died sooner, among people whose records could be compared. A score of 0.5 is what you’d expect from guessing.</p>
         {evaluation.unavailable_reason && <p>{evaluation.unavailable_reason}</p>}
         {evaluation.model_version && <p>Model {evaluation.model_version}</p>}
@@ -73,6 +78,7 @@ export default function EvaluationResults({ evaluation, full = false, ended = fa
         {full && interval && <p>The interval shows how much the test score might vary if we tested the same model on another group like this one.</p>}
       </details>
     </>}
+    {!evaluation && patientSummary}
   </section>;
 }
 

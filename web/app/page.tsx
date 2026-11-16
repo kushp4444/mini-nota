@@ -277,7 +277,7 @@ export default function Home() {
               aria-current={view === name ? "page" : undefined}
               onClick={() => setView(name)}
             >
-              {name === "History" ? "Run history" : name}
+              {name}
             </button>
           ))}
         </nav>
@@ -309,16 +309,10 @@ export default function Home() {
                       ? "Cohort analysis"
                       : view === "Examples" ? "Curated examples" : "Run history"}
                 </h1>
-                <p>
-                  {view === "Patients"
-                    ? "Select a cohort to inspect scan quality, tumor masks and radiomic features."
-                    : "An auditable view of your imaging workflow."}
-                </p>
               </div>
-              <span className="tag">{catalog.some((p) => p.fixture) ? "Development fixture" : "Frozen held-out library"}</span>
             </div>
             <div className="card example-launch">
-              <div><h2>Read a completed run</h2><p>Inspect the findings and recorded decisions. Your own runs are saved separately in this browser’s Run history.</p></div>
+
               <button className="primary" onClick={() => openExample("success")}>View completed example</button>
               <button className="example-secondary" onClick={() => openExample("failure")}>View failure example</button>
             </div>
@@ -384,9 +378,9 @@ export default function Home() {
                 {example ? <>
                   <div className="card" role="note"><h2>{example.example.description}</h2>
                     <p>Static curated example · read-only · never launches or resumes a visitor run.</p>
-                    <p>{example.patientIds.length} selected public Lung1 held-out patients. This selection is separate from the full {example.events.find(e => e.kind === "plan")?.payload.model?.held_out_count}-patient held-out evaluation.</p>
+                    <p>{example.patientIds.length} selected patients.</p>
                     {example.example.faults.length > 0 && <><strong>Deliberately introduced fixture faults; the live library is unchanged.</strong><ul>{example.example.faults.map(fault => <li key={fault}>{fault}</li>)}</ul></>}
-                    <p>Model: {example.example.provenance.model_version}</p>
+
                   </div>
                   <History runs={[]} selected={example} onSelect={() => {}} example />
                 </> : <p>Select a completed or failure example above.</p>}
@@ -488,13 +482,13 @@ export default function Home() {
                     {status === "idle" ? "Ready to run" : status}
                   </span>
                 </div>
-                <HeldOutBenchmark events={events} />
                 {!events.length && <div className="card stage-empty"><p>Start a run to see real patient checks arrive here.</p><button className="primary" onClick={start} disabled={recoveringHistory || !selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}>Run analysis</button></div>}
+                {activeRun.current && <ApprovalGate run={activeRun.current} onApprove={approveCurrent} />}
+                <ScoreResults selectedIds={analysisIds} events={events} showBenchmark={false} />
+                <HeldOutBenchmark events={events} />
                 <QCResults selectedIds={analysisIds} results={results} ended={terminal(status)} />
                 <MaskResults selectedIds={analysisIds} results={masks} qcResults={results} ended={terminal(status)} />
                 <FeatureResults selectedIds={analysisIds} results={features} qcResults={results} maskResults={masks} ended={terminal(status)} />
-                {activeRun.current && <ApprovalGate run={activeRun.current} onApprove={approveCurrent} />}
-                <ScoreResults selectedIds={analysisIds} events={events} showBenchmark={false} />
               </>
             )}
           </section>
@@ -502,27 +496,20 @@ export default function Home() {
             <div className="agent-heading">
               <div>
                 <h2 id="agent-heading">Agent panel</h2>
-                <p>Plan, results and recorded decisions</p>
               </div>
             </div>
-            <div className="agent-intro">
-              Follow the four stages and inspect each event in the run record.
-            </div>
-            <div className="stage-list">
-              <span className={status === "running" ? "stage-running" : ""}>
-                01
-              </span>
-              <div>
-                <strong>Quality control</strong>
-                <small>Selected-patient scan checks</small>
-              </div>
-            </div>
-            <div className="stage-list">
-              <span>02</span>
-              <div><strong>Tumor masks</strong><small>Aligned overlays and physical volumes</small></div>
-            </div>
-            <div className="stage-list"><span>03</span><div><strong>Radiomic features</strong><small>Real quantitative measurements</small></div></div>
-            <div className="stage-list"><span>04</span><div><strong>Frozen model scoring</strong><small>Fixed development model · no live fitting</small></div></div>
+            {displayedEvents.length > 0 && <ul className="run-stage-index" aria-label="Stages with results">
+              {[
+                ["qc", "Scan checks"],
+                ["masks", "Tumor masks"],
+                ["features", "Tumor measurements"],
+                ["score", "Risk scores"],
+              ].filter(([stage]) => displayedEvents.some(event =>
+                event.kind === "tool_result" && event.payload.stage === stage,
+              )).map(([stage, label]) => <li key={stage}>{label}</li>)}
+            </ul>}
+            <details key={view} open={view === "Analysis" || view === "Patients"}>
+              <summary>Run events</summary>
             <div className="timeline" role="region" aria-label="Run events">
               {displayedEvents.length ? (
                 displayedEvents.map((e) => (
@@ -546,6 +533,7 @@ export default function Home() {
                 </p>
               )}
             </div>
+            </details>
             <div className="agent-foot">
               Private run access · browser-local History
             </div>

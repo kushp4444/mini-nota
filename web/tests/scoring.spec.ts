@@ -12,13 +12,13 @@ test("real held-out patient receives frozen model score and retains it in Histor
   expect(data.modelMetadata.reference_count).toBe(332);
   const id = data.patients[0].id;
   await page.goto('/');
-  await expect(page.getByText('82 available patients')).toBeVisible();
+  await expect(page.getByText('82 frozen held-out patients')).toBeVisible();
   await page.getByLabel('Select all patients').uncheck();
   await page.getByLabel(`Select ${id}`, {exact:true}).check();
   await page.getByRole('button',{name:'Run analysis'}).click();
   const scores = page.getByLabel('Frozen model risk scores', {exact:true});
   await expect(scores.getByText('1 / 1 scored',{exact:true})).toBeVisible({timeout:90000});
-  const finding = scores.getByText(new RegExp(`${id} scored as high as or higher than about .* of the patients the model learned from`));
+  const finding = scores.getByRole("heading", { name: id, exact: true });
   await expect(finding).toBeVisible();
   await expect(scores.getByText(/Reference percentile/)).toBeVisible();
   const table = scores.getByRole("table", { name: "Patient risk scores", includeHidden: true });

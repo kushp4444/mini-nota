@@ -10,6 +10,10 @@ test('curated execution is immediately inspectable without launching a visitor r
   const results = page.getByRole('region', {name:'Saved run results'});
   await expect(results.getByText(/of the two patients we could compare, the one the model ranked higher lived longer/i)).toBeVisible();
   const scoring = results.getByRole('region', {name:'Frozen model risk scores'});
+  for (const [id, days] of [["LUNG1-002", "155 days"], ["LUNG1-009", "131 days"]]) {
+    const patient = scoring.locator(".patient-risk-findings > div").filter({has: page.getByRole("heading", {name: id, exact: true})});
+    await expect(patient.getByText(`Recorded death at ${days}`, {exact: true})).toBeVisible();
+  }
   const scoreTable = scoring.getByRole('table', {name:'Patient risk scores', includeHidden:true});
   await expect(scoreTable).toBeHidden();
   await scoring.locator(':scope > details > summary').click();
@@ -48,6 +52,7 @@ test('curated execution is immediately inspectable without launching a visitor r
   await expect(results.getByText(/One patient died at .* and the other at .* after follow-up began/)).toBeVisible();
   await features.getByRole('button', {name:'Inspect LUNG1-009',exact:true}).click();
   await expect(features.getByRole('heading', {name:'LUNG1-009 feature details'})).toBeVisible();
+  await page.locator('summary').getByText('Run events', {exact:true}).click();
   const timeline = page.locator('.timeline .event');
   await expect(timeline.first()).toContainText('plan');
   await expect(timeline.last()).toContainText('done');
