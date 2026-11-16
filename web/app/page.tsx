@@ -482,10 +482,11 @@ export default function Home() {
                     {status === "idle" ? "Ready to run" : status}
                   </span>
                 </div>
+                {!events.length && <HeldOutBenchmark events={events} />}
                 {!events.length && <div className="card stage-empty"><p>Start a run to see real patient checks arrive here.</p><button className="primary" onClick={start} disabled={recoveringHistory || !selection.length || browserBusy || Boolean(activeRun.current && !terminal(activeRun.current.status))}>Run analysis</button></div>}
                 {activeRun.current && <ApprovalGate run={activeRun.current} onApprove={approveCurrent} />}
                 <ScoreResults selectedIds={analysisIds} events={events} showBenchmark={false} />
-                <HeldOutBenchmark events={events} />
+                {!!events.length && <HeldOutBenchmark events={events} />}
                 <QCResults selectedIds={analysisIds} results={results} ended={terminal(status)} />
                 <MaskResults selectedIds={analysisIds} results={masks} qcResults={results} ended={terminal(status)} />
                 <FeatureResults selectedIds={analysisIds} results={features} qcResults={results} maskResults={masks} ended={terminal(status)} />
