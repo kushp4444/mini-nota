@@ -106,7 +106,8 @@ test(`${outcome} results and PNG bytes survive reload and a new run without serv
   await page.reload();
   await page.getByRole("button", { name: "History", exact: true }).click();
   await page.getByRole("button", { name: /Open run fixture-1/ }).click();
-  await expect(page.getByText("12.5", { exact: false })).toBeVisible();
+  await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
+  await expect(page.getByText("Tumor volume: 12.5 cm³", { exact: true })).toBeVisible();
   await expect(page.getByRole("img", { name: /overlay/ })).toBeVisible();
   await expect(page.getByRole("img", { name: /overlay/ })).toHaveJSProperty(
     "naturalWidth",
@@ -131,6 +132,7 @@ test(`${outcome} results and PNG bytes survive reload and a new run without serv
   await page.reload();
   await page.getByRole("button", { name: "History", exact: true }).click();
   await page.getByRole("button", { name: /Open run fixture-1/ }).click();
+  await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
   await expect(page.getByRole("img", { name: /overlay/ })).toHaveJSProperty(
     "naturalWidth",
     1,
@@ -159,6 +161,7 @@ test("failed runs retain available results and name unfinished stages", async ({
   ).toBeVisible();
   await expect(results.getByText("Not run — no result saved")).toHaveCount(2);
   await expect(results.getByText("Unfinished — no result saved")).toBeVisible();
+  await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
   await expect(results.getByRole("img")).toHaveCount(1);
   await expect(page.locator(".timeline .event").first()).toContainText(
     "Synthetic mask result",
@@ -283,6 +286,7 @@ test("temporary artifact bytes remain local after the application artifact disap
   await page.reload();
   await page.getByRole("button", { name: "History", exact: true }).click();
   await page.getByRole("button", { name: /Open run fixture-1/ }).click();
+  await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
   await expect(page.getByRole("img", { name: /overlay/ })).toHaveJSProperty(
     "naturalWidth",
     12,
@@ -344,7 +348,8 @@ test("missing artifacts retain actual numerical results and a named warning", as
   await expect(page.getByRole("alert").filter({ hasText: /Browser history|Browser storage|Missing artifact/ })).toContainText(
     "Missing artifact: overlay",
   );
-  await expect(page.getByText("12.5", { exact: false })).toBeVisible();
+  await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
+  await expect(page.getByText("Tumor volume: 12.5 cm³", { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Saved run results" }).getByRole("img")).toHaveCount(0);
 });
 
@@ -394,6 +399,7 @@ test("Analysis keeps the saved run cohort when the next selection changes", asyn
   await expect(page.getByText("0 of 1 patients selected", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Analysis", exact: true }).click();
   await expect(page.locator(".run-summary")).toContainText("1 patients");
+  await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
   await expect(page.getByRole("img", { name: /LUNG1-001 tumor mask overlay/ })).toBeVisible();
 });
 
@@ -438,12 +444,14 @@ test("missing authorized artifact bytes can be recovered without replaying the r
   await page.getByRole("button", {name: "Open run fixture-1"}).click();
   const results = page.getByRole("region", {name: "Saved run results"});
   await results.getByRole("button", {name: "Retry overlay download"}).click();
+  await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
   await expect(results.getByRole("img", {name: /LUNG1-001 tumor mask overlay/})).toHaveJSProperty("naturalWidth", 1);
   await expect(results.getByRole("link", {name: "Open saved summary"})).toBeVisible();
   await expect(page.locator(".timeline .event")).toHaveCount(2);
   await page.reload();
   await page.getByRole("button", {name: "History", exact: true}).click();
   await page.getByRole("button", {name: "Open run fixture-1"}).click();
+  await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
   await expect(results.getByRole("img", {name: /LUNG1-001 tumor mask overlay/})).toHaveJSProperty("naturalWidth", 1);
   expect([overlayRequests, tableRequests, replayRequests]).toEqual([3, 1, 1]);
 });

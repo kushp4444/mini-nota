@@ -17,7 +17,7 @@ def run_model_tool(stage, rows, model_version, bundle_path, outcomes_path, expec
     if stage == 'score':
         patients = model.score(rows,model_version)
         return {'stage':'score','schema_version':1,'status':'success','patients':patients,'errors':[], 'model':model.metadata(),
-                'evaluation':evaluate_scores(patients,outcomes)}
+                'evaluation':evaluate_scores(patients,outcomes,include_follow_up=True)}
     if stage != 'eligibility':
         raise ModelError('Unknown model tool')
     return {'stage':'eligibility','schema_version':1,'status':'success', 'model':model.metadata(),

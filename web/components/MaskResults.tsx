@@ -1,5 +1,7 @@
 "use client";
 
+import { useId, useState, type ReactNode } from "react";
+
 export type MaskPatientResult = {
   patient_id: string;
   status: string;
@@ -9,11 +11,13 @@ export type MaskPatientResult = {
 };
 
 /** Render retained stage values and bytes; no expiring server URLs. */
-export default function MaskResults({ selectedIds, results, qcResults, ended=false }: {
+export default function MaskResults({ selectedIds, results, qcResults, ended=false, compact=false, children }: {
   selectedIds: string[];
   results: MaskPatientResult[];
   qcResults: MaskPatientResult[];
   ended?:boolean;
+  compact?: boolean;
+  children?: ReactNode;
 }) {
   const ready = results.filter(result => result.status === "success").length;
   const failures = results.length - ready;
@@ -25,15 +29,38 @@ export default function MaskResults({ selectedIds, results, qcResults, ended=fal
         ? "No tumor mask results were saved before the run ended."
         : "Tumor masks are created after patients pass scan checks.";
 
+  const controlId = useId();
+  const [query, setQuery] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const term = query.trim().toLowerCase();
+  const visibleIds = term ? selectedIds.filter(id => id.toLowerCase().includes(term))
+    : showAll ? selectedIds : selectedIds.slice(0, 3);
+  const volumes = results.filter(result => result.status === "success" && typeof result.values.volume_cm3 === "number" && Number.isFinite(result.values.volume_cm3));
+
   return <section className="card results" aria-label="Tumor masks">
-    <div className="card-heading"><h2>Tumor masks</h2></div>
-    <p className="result-finding">{finding}</p>
-    {!!results.length && <p className="result-caption">
+    <details className="result-disclosure">
+      <summary><h2>Scans</h2><span>{qcResults.filter(result => result.status === "success").length} passed</span></summary>
+    {!compact && <p className="result-finding">{finding}</p>}
+    {!compact && !!results.length && <p className="result-caption">
       {ready} {ready === 1 ? "patient with a tumor mask" : "patients with tumor masks"}
       {failures ? ` · ${failures} mask construction ${failures === 1 ? "failure" : "failures"}` : ""}
     </p>}
-    {results.length || qcResults.length ? <div className="patient-results" tabIndex={0} role="region" aria-label="Patient tumor masks">
-      {selectedIds.map(id => {
+    {(results.length > 0 || qcResults.length > 0) && <>
+      <div className="result-search">
+        <label htmlFor={controlId}>Search by patient ID</label>
+        <input id={controlId} type="search" placeholder={selectedIds[0] ? `e.g. ${selectedIds[0]}` : undefined}
+          value={query} onChange={event => setQuery(event.target.value)} aria-controls={`${controlId}-scans`} />
+        <div className="result-actions">
+          <span>or</span>
+          <button type="button" className="primary" aria-controls={`${controlId}-scans`} aria-expanded={showAll && !term}
+            onClick={() => { setShowAll(Boolean(term) || !showAll); setQuery(""); }}>
+            {showAll && !term ? "Show fewer" : "View all"}
+          </button>
+        </div>
+        <span role="status">{visibleIds.length ? `Showing ${visibleIds.length} of ${selectedIds.length} scans` : "No matching patients"}</span>
+      </div>
+      <div id={`${controlId}-scans`} className="patient-results scan-result-grid" tabIndex={0} role="region" aria-label="Patient tumor masks">
+      {visibleIds.map(id => {
         const patient = results.find(r => r.patient_id === id);
         const qc = qcResults.find(r => r.patient_id === id);
         const excluded = qc && qc.status !== "success";
@@ -46,39 +73,58 @@ export default function MaskResults({ selectedIds, results, qcResults, ended=fal
         const voxelCount = values?.voxel_count;
         const sliceIndex = values?.slice_index;
         return <article key={id} className="patient-result">
-          <div className="patient-heading"><strong>{id}</strong>
+          {(!compact || !overlay || patient?.status !== "success") && <div className="patient-heading"><strong>{id}</strong>
             <span className={`status ${excluded ? "failed" : patient?.status || (ended?"not-run":"pending")}`}>
               {excluded ? "Excluded by QC" : patient?.status || (ended?"Not run":"Pending")}
             </span>
-          </div>
+          </div>}
           {patient?.status === "success" && values ? <>
-            <p className="result-caption">
+            {(!compact || !overlay) && <p className="result-caption">
               {typeof volume === "number" && Number.isFinite(volume)
                 ? `Tumor volume: ${volume.toLocaleString(undefined, { maximumFractionDigits: 3 })} cm³`
                 : "Tumor volume unavailable"}
               {typeof voxelCount === "number" && Number.isFinite(voxelCount)
                 ? ` · ${voxelCount.toLocaleString()} tumor voxels` : ""}
-            </p>
+            </p>}
             {overlay ? <figure style={{ margin: "16px 0 0", maxWidth: 512 }}>
-              <div style={{ aspectRatio: ratio, background: "#000" }}>
+              <div className="scan-image" style={{ aspectRatio: ratio }}>
                 {/* Bytes are owned by this result and remain usable after worker cleanup. */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img alt={`${id} tumor mask overlay on middle tumor-bearing CT slice`} src={`data:image/png;base64,${overlay.data_base64}`} style={{ width: "100%", height: "100%", display: "block" }} />
+                <img tabIndex={0} aria-describedby={`${controlId}-scan-${id}`}
+                  alt={`${id} tumor mask overlay on middle tumor-bearing CT slice`}
+                  src={`data:image/png;base64,${overlay.data_base64}`} style={{width: "100%", height: "100%", display: "block"}} />
+                <div className="scan-tooltip" role="tooltip" id={`${controlId}-scan-${id}`}>
+                  <p>The orange overlay marks the tumor.</p>
+                  {compact && typeof volume === "number" && Number.isFinite(volume) && <p>Tumor volume: {volume.toLocaleString(undefined, {maximumFractionDigits: 3})} cm³</p>}
+                  {typeof voxelCount === "number" && <p>{voxelCount.toLocaleString()} tumor voxels</p>}
+                  {spacing && <p>Spacing (slice × row × column) {spacing.map(n => n.toLocaleString(undefined, {maximumFractionDigits: 5})).join(" × ")} mm</p>}
+                  {typeof sliceIndex === "number" && shape && <p>Middle tumor-bearing slice {sliceIndex + 1} of {shape[0]}. Lung window −1000 to 400 HU.</p>}
+                </div>
               </div>
-              <figcaption className="result-caption">The orange overlay shows the tumor on a CT slice.</figcaption>
+              <figcaption className="scan-figure-caption">
+                <span>{id}</span>
+                {typeof volume === "number" && Number.isFinite(volume) && <span>{volume.toLocaleString(undefined, {maximumFractionDigits: 3})} cm³</span>}
+              </figcaption>
             </figure> : <p className="muted">No overlay image is available for this result.</p>}
-            {(spacing || (overlay && typeof sliceIndex === "number" && shape)) && <details className="result-details">
-              <summary>View details</summary>
-              {spacing && <p>Spacing (slice × row × column) {spacing.map(n => n.toLocaleString(undefined, { maximumFractionDigits: 5 })).join(" × ")} mm</p>}
-              {overlay && typeof sliceIndex === "number" && shape && <p>
-                Middle tumor-bearing slice {sliceIndex + 1} of {shape[0]} · native CT plane · lung window −1000 to 400 HU
-              </p>}
+            {!overlay && spacing && <details className="scan-caption">
+              <summary>Scan details</summary>
+              <p>Spacing (slice × row × column) {spacing.map(n => n.toLocaleString(undefined, {maximumFractionDigits: 5})).join(" × ")} mm</p>
             </details>}
           </> : <p className={patient?.errors.length ? "error-text" : "muted"}>
             {patient?.errors.length ? patient.errors.map(e => e.message).join("; ") : excluded ? "This patient did not pass scan checks and was not sent to mask construction." : ended ? "No mask result was saved before the run ended." : "Waiting for mask construction after scan checks…"}
           </p>}
         </article>;
       })}
-    </div> : null}
+    </div></>}
+    {volumes.length > 0 && <details className="result-inner-details">
+      <summary>View tumor volumes</summary>
+      <table className="tumor-volumes"><thead><tr><th scope="col">Patient</th><th scope="col">Volume</th></tr></thead>
+        <tbody>{volumes.map(patient => <tr key={patient.patient_id}><th scope="row">{patient.patient_id}</th><td>
+          {(patient.values.volume_cm3 as number).toLocaleString(undefined, {maximumFractionDigits: 3})} cm³
+        </td></tr>)}</tbody>
+      </table>
+    </details>}
+    {children}
+    </details>
   </section>;
 }

@@ -33,6 +33,7 @@ test('closing a tab then returning after completion resumes cursor and retains a
  await returned.reload(); await returned.getByRole('button',{name:'History',exact:true}).click();
  await returned.getByRole('button',{name:/Open run recover/}).click();
  await expect(returned.locator('.timeline .event')).toHaveCount(3);
+ await returned.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
  await expect(returned.getByRole('img',{name:/overlay/})).toHaveJSProperty('naturalWidth',1);
 });
 for (const outcome of ['lose','stale'] as const) test(`${outcome} runner access produces explained local failure and permits a new run`,async ({context,page})=>{
@@ -71,13 +72,16 @@ test('a replay gap is disclosed without accepting terminal completion or losing 
 test('worker loss preserves collected overlay bytes and names outputs that never arrived',async ({context,page})=>{
  const server=await setup(context); await page.goto('/'); await page.getByRole('button',{name:'Run analysis'}).click();
  await expect(page.locator('.timeline')).toContainText('Synthetic plan');
- server.mask(); await expect(page.getByRole('img',{name:/tumor mask overlay/})).toHaveJSProperty('naturalWidth',1);
+ server.mask();
+  await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
+ await expect(page.getByRole('img',{name:/tumor mask overlay/})).toHaveJSProperty('naturalWidth',1);
  server.lose(); await page.reload();
  await expect(page.getByText(/Outputs never received here cannot be recovered/)).toBeVisible();
  await page.getByRole('button',{name:'History',exact:true}).click();
  await page.getByRole('button',{name:/Open run recover/}).click();
+  await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
  await expect(page.getByRole('img',{name:/overlay/})).toHaveJSProperty('naturalWidth',1);
- await expect(page.getByText('12.5',{exact:false})).toBeVisible();
+ await expect(page.getByText('Tumor volume: 12.5 cm³',{exact:true})).toBeVisible();
  await expect(page.locator('.timeline .event')).toHaveCount(2);
 });
 

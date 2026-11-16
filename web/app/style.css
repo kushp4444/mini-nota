@@ -954,3 +954,197 @@ tr.selected { background: var(--color-paper-2); }
 .patient-risk-findings > p { grid-column: 1 / -1; }
 .survival-comparison { align-items: start; }
 .patient-risk-findings { max-height: 28rem; overflow-y: auto; padding: 4px; }
+
+/* Curated examples follow the approved Almanac reference sheet. */
+.example-layout {
+  max-width: 1280px;
+  font-size: 18px;
+  line-height: 1.5;
+}
+.example-layout > .nav,
+.example-layout .content > header,
+.example-layout .disclaimer,
+.example-layout .workspace-title,
+.example-layout .example-launch { display: none; }
+
+.example-masthead {
+  min-height: 100px;
+  height: auto;
+  padding-inline: 40px;
+  gap: 40px;
+  border-bottom: 2px solid var(--color-rule-2);
+}
+.example-wordmark, .example-return {
+  border: 0;
+  background: transparent;
+  color: var(--color-ink);
+  padding: 0;
+}
+.example-wordmark { font: 600 26px var(--font-display); }
+.example-return { margin-left: auto; font-size: 14px; color: var(--color-muted); }
+.example-masthead nav { display: flex; flex-wrap: wrap; gap: 26px; }
+.example-masthead nav a { font-size: 16px; text-underline-offset: .3em; }
+.example-layout main { display: block; padding: 0 40px; }
+.example-layout .center { min-width: 0; }
+.example-run-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  padding-block: 36px;
+}
+.example-run-heading h2 { font-size: 36px; line-height: 1.15; }
+.example-run-heading p { margin: 8px 0; color: var(--color-muted); line-height: 1.5; }
+.example-record-link { border: 1px solid var(--color-rule-2); padding: 12px 16px; font-size: 16px; text-decoration: none; }
+.example-layout .saved-run { padding: 0; background: transparent; border: 0; }
+.example-layout .saved-run > .results { margin: 0 0 32px; background: var(--color-sheet); }
+.example-layout .score-results > .evaluation-result {
+  border: 0;
+  margin: 0;
+  padding: 28px 32px 0;
+}
+.example-section-heading { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; }
+.example-section-heading h3 { font-size: 23px; margin: 0; }
+.example-section-heading span { color: var(--color-muted); font-size: 15px; }
+.example-finding { padding-block: 24px 12px; }
+.example-finding h4 { font-size: 30px; max-width: 26ch; line-height: 1.15; text-wrap: balance; margin: 0; }
+.example-finding p, .example-layout .evaluation-result p { margin: 8px 0; line-height: 1.5; }
+.example-layout .survival-comparison { grid-template-columns: minmax(0,1.65fr) minmax(0,1fr); gap: 40px; align-items: center; }
+.example-layout .survival-comparison svg { display: block; max-width: none !important; }
+.example-layout .patient-risk-findings { padding: 0; gap: 0; }
+.example-layout .patient-risk-findings > div { padding-block: 18px; }
+.example-layout .patient-risk-findings h4 { font-size: 20px; margin: 0; }
+.example-patient-numbers { display: flex; justify-content: space-between; gap: 16px; padding-top: 12px; font-size: 14px; }
+.example-patient-numbers b { display: block; font: 500 30px var(--font-outlier); }
+.example-layout .score-results > .result-details { margin: 0 32px; padding-bottom: 12px; }
+.example-layout .evaluation-result details { border-top: 1px solid var(--color-rule); margin-top: 16px; padding-block: 12px; }
+.example-layout .saved-run > .evaluation-result { border: 0; padding: 0; }
+.example-layout #scans, .example-layout #measurements { background: var(--color-sheet); border-top: 2px solid var(--color-rule-2); padding: 28px 32px; margin-bottom: 32px; }
+.example-layout #scans > .results, .example-layout #measurements > .results { border: 0; background: transparent; }
+.example-layout #scans .patient-results { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 32px; max-height: none; }
+.example-layout #scans .patient-result { min-width: 0; padding-inline: 0; }
+.example-layout #scans img { max-height: 280px; object-fit: contain; }
+.example-layout .agent { position: static; margin: 32px 0 0; }
+.example-layout footer { display: block; border-top: 1px solid var(--color-rule-2); margin: 40px 0 0; padding: 24px 40px; font-size: 14px; color: var(--color-muted); }
+@media (max-width: 700px) {
+  .example-masthead { flex-wrap: wrap; padding: 20px; gap: 16px; }
+  .example-masthead nav { order: 3; width: 100%; gap: 20px; }
+  .example-layout main { padding-inline: 20px; }
+  .example-run-heading { flex-direction: column; align-items: start; }
+  .example-layout .score-results > .evaluation-result, .example-layout #scans, .example-layout #measurements { padding: 24px 20px; }
+  .example-layout .survival-comparison, .example-layout #scans .patient-results { grid-template-columns: minmax(0,1fr); gap: 24px; }
+  .example-finding h4 { font-size: 26px; }
+  .example-layout .survival-comparison .patient-risk-findings { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
+  .example-patient-numbers { flex-wrap: wrap; }
+}
+.example-run-heading h2, .example-section-heading h3 { letter-spacing: 0; }
+.example-section-heading h3, .example-finding h4 { line-height: 1.15; }
+.example-layout .survival-comparison svg { fill: var(--color-ink); font-family: var(--font-body); }
+.example-record-link { line-height: 1.5; }
+.example-layout .patient-risk-findings h4 { line-height: 1.15; letter-spacing: 0; }
+.example-layout #scans .patient-results { padding: 0; margin-top: 24px; }
+.example-layout #scans > .results { margin: 0; }
+.example-layout #scans .patient-result { padding: 0; border: 0; }
+.example-layout #scans figure { max-width: none !important; margin: 0 !important; }
+.example-layout #scans figure > div { aspect-ratio: auto !important; background: transparent !important; }
+.example-layout #scans figure img { height: auto !important; }
+.example-layout #scans figcaption { display: flex; justify-content: space-between; margin-top: 12px; font-size: 16px; color: var(--color-ink); }
+.example-layout #scans article > details { margin: 0; }
+.example-layout #measurements .result-caption { margin-inline: 0; }
+.example-layout #measurements > .results { margin: 0; }
+.example-layout #measurements .result-details { margin: 16px 0 0; border-top: 1px solid var(--color-rule); }
+.example-layout .saved-evidence { margin-top: 24px; }
+@media (max-width: 700px) {
+  .example-masthead { border-bottom-width: 2px; }
+  .example-wordmark, .example-return { min-height: 34px; }
+  .example-layout .score-results > .evaluation-result { padding-bottom: 0; }
+}
+.example-layout .example-benchmark {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(0,380px);
+  column-gap: 32px;
+  row-gap: 8px;
+  margin: 0 0 32px;
+  align-items: start;
+}
+.example-benchmark .example-section-heading, .example-benchmark > .result-finding { grid-column: 1; }
+.example-benchmark .example-section-heading h3 { font-size: 20px; }
+.example-benchmark > .result-finding { font: inherit; margin: 0; }
+.example-layout .example-benchmark > details { grid-column: 2; grid-row: 1 / span 2; margin-top: 0; }
+@media (max-width: 700px) {
+  .example-layout .example-benchmark { grid-template-columns: minmax(0,1fr); }
+  .example-layout .example-benchmark > details { grid-column: 1; grid-row: auto; }
+}
+.example-layout .agent { background: transparent; border-top: 0; }
+.example-layout .agent-heading { padding: 0; border: 0; }
+.example-layout .agent-heading h2 { font-size: 23px; }
+.example-layout .agent > details { margin-top: 16px; border-top: 1px solid var(--color-rule); padding-block: 16px; }
+.example-layout .example-benchmark { padding-bottom: 24px; margin-bottom: 0; }
+.example-layout .saved-run > .example-benchmark { padding-bottom: 24px; }
+.example-layout #measurements { padding-bottom: 44px; }
+.example-layout #scans article > details { margin-bottom: 0; padding-bottom: 0; }
+
+/* The live controls use the same layout as the nine-patient preview. */
+.result-disclosure { padding: 24px; }
+.example-layout .result-disclosure { padding: 0; }
+.result-disclosure > summary { padding: 0; margin-bottom: 12px; cursor: pointer; }
+.result-disclosure:not([open]) > summary { margin-bottom: 0; }
+.result-disclosure > summary h2 { display: inline; font-size: 23px; margin: 0; }
+.result-disclosure > summary > span { float: inline-end; color: var(--color-muted); font-size: 15px; }
+.result-disclosure > .result-finding, .result-disclosure > .result-caption { margin-inline: 0; }
+.result-search { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-block: 16px; }
+.result-search input { width: min(100%,18rem); min-height: 40px; padding: 8px 12px; border: 1px solid var(--color-rule-2); border-radius: 2px; background: var(--color-sheet); color: var(--color-ink); font: inherit; }
+.result-actions { display: flex; align-items: center; gap: 8px; }
+.result-actions .primary { font: inherit; padding: 12px 16px; }
+.result-search [role=status] { flex: 1 0 auto; margin-inline-start: auto; text-align: right; color: var(--color-muted); font-size: 15px; }
+.result-inner-details { margin-top: 16px; padding-block: 12px; border-top: 1px solid var(--color-rule); }
+.tumor-volumes th:last-child, .tumor-volumes td { text-align: right; }
+.scan-result-grid, .example-layout #scans .scan-result-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 24px; max-height: none; padding: 0; }
+.scan-result-grid .patient-result { min-width: 0; }
+.feature-results .feature-scroll[hidden] { display: none; }
+.feature-results .feature-detail { padding-inline: 0; }
+.feature-results .measurement-status { margin: 16px 0 8px; text-align: left; }
+.completed-stages { list-style: none; padding: 0; }
+.completed-stages li { display: flex; align-items: baseline; gap: 12px; }
+.stage-check { display: inline-grid; place-items: center; flex: 0 0 1.15em; height: 1.15em; border: 1px solid currentColor; border-radius: 50%; color: var(--color-accent); font: 600 .85em/1 var(--font-display); }
+.example-run-heading h1 { font-size: 36px; line-height: 1.15; margin: 0; letter-spacing: 0; }
+@media (max-width: 700px) {
+  .scan-result-grid, .example-layout #scans .scan-result-grid { grid-template-columns: minmax(0,1fr); }
+  .result-disclosure { padding: 18px 16px; }
+}
+.patient-score-panel { min-width: 0; }
+.patient-score-panel > .result-caption { margin-top: 8px; }
+.patient-score-panel > .example-section-heading { margin-bottom: 12px; }
+.patient-score-panel > .example-section-heading h4 { font-size: 20px; margin: 0; }
+.example-layout .patient-risk-findings:has(> div:nth-child(4)) { display: block; max-height: 300px; padding-inline-end: 12px; }
+.example-layout .patient-risk-findings:has(> div:nth-child(4)) > div { padding-block: 12px; }
+.example-layout .patient-risk-findings:has(> div:nth-child(4)) h4 { font-size: 16px; }
+.example-layout .patient-risk-findings:has(> div:nth-child(4)) b { font-size: 23px; }
+.example-layout .survival-comparison:has(.patient-score-panel > .example-section-heading) { align-items: start; }
+.survival-legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 15px; }
+.survival-legend .higher-score-line, .survival-legend .lower-score-line { display: inline-block; width: 20px; margin-inline-end: 6px; border-top: 2px solid var(--color-accent); vertical-align: middle; }
+.survival-legend .lower-score-line { border-top: 2px dashed var(--color-ink); }
+.example-finding h4, .patient-score-panel > .example-section-heading h4 { letter-spacing: 0; }
+.patient-score-panel > .example-section-heading h4 { line-height: 1.15; }
+.example-masthead nav { gap: 24px; }
+@media (max-width: 700px) {
+  .example-masthead nav { gap: 20px; }
+}
+
+/* Scan captions and the volume table follow the HTML preview. */
+.scan-result-grid .scan-figure-caption,
+.example-layout #scans .scan-figure-caption { display: block; margin-top: 12px; text-align: right; }
+.scan-caption { border: 0; padding: 0; margin: 0; font-size: 14px; }
+.scan-caption summary { min-height: 0; padding: 0; font-size: 16px; }
+.scan-caption p { margin: 4px 0 0 auto; color: var(--color-muted); line-height: 1.45; }
+.tumor-volumes th, .tumor-volumes td { padding: 16px 12px; width: auto; border-bottom: 1px solid var(--color-rule); background: transparent; font: 500 15px var(--font-body); }
+.tumor-volumes td { font-family: var(--font-outlier); font-weight: 400; }
+.scan-result-grid .scan-figure-caption,
+.example-layout #scans .scan-figure-caption { display: flex; justify-content: space-between; gap: 8px; }
+.scan-image { position: relative; background: var(--color-ink); }
+.scan-tooltip { display: none; pointer-events: none; position: absolute; z-index: 2; inset: auto 8px 8px; padding: 8px 12px; background: var(--color-ink); color: var(--color-sheet); font-size: 14px; }
+.scan-tooltip p { margin: 3px 0; line-height: 1.4; }
+.scan-image:hover .scan-tooltip, .scan-image:focus-within .scan-tooltip { display: block; }
+.tumor-volumes tbody tr:hover > * { background: var(--color-paper); }
+
+.result-inner-details.scan-checks-details { border-top: 0; }

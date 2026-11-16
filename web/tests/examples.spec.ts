@@ -5,14 +5,14 @@ test('curated execution is immediately inspectable without launching a visitor r
   await page.route('**/api/runs**', async route => { launches++; await route.abort(); });
   await page.goto('/');
   await page.getByRole('button', {name:'View completed example', exact:true}).click();
-  await expect(page.getByText('Curated success · actual execution', {exact:true})).toBeVisible();
+  await expect(page.getByText('Completed example', {exact:true})).toBeVisible();
   await expect(page.getByRole('region', {name:'Saved run results'})).toBeVisible();
   const results = page.getByRole('region', {name:'Saved run results'});
-  await expect(results.getByText(/of the two patients we could compare, the one the model ranked higher lived longer/i)).toBeVisible();
+  await expect(results.getByText('The higher-ranked patient lived longer.')).toBeVisible();
   const scoring = results.getByRole('region', {name:'Frozen model risk scores'});
   for (const [id, days] of [["LUNG1-002", "155 days"], ["LUNG1-009", "131 days"]]) {
     const patient = scoring.locator(".patient-risk-findings > div").filter({has: page.getByRole("heading", {name: id, exact: true})});
-    await expect(patient.getByText(`Recorded death at ${days}`, {exact: true})).toBeVisible();
+    await expect(patient.getByText(`${days.split(" ")[0]}days to recorded death`, {exact: true})).toBeVisible();
   }
   const scoreTable = scoring.getByRole('table', {name:'Patient risk scores', includeHidden:true});
   await expect(scoreTable).toBeHidden();
@@ -20,18 +20,19 @@ test('curated execution is immediately inspectable without launching a visitor r
   await expect(scoreTable).toBeVisible();
   await expect(page.getByText('Not a medical device or medical advice.', {exact:false})).toBeVisible();
   const masks = page.getByRole('region', {name:'Tumor masks'});
-  await expect(masks.getByText('Tumor masks were created from the CT scans.')).toBeVisible();
-  await expect(masks.getByText('2 patients with tumor masks')).toBeVisible();
+  await masks.locator('summary').first().click();
+  await expect(masks.getByText('2 passed')).toBeVisible();
   const firstMask = masks.getByRole('article').filter({hasText:'LUNG1-002'});
-  await expect(firstMask.getByText('Tumor volume: 368.707 cm³ · 128,757 tumor voxels')).toBeVisible();
+  await firstMask.getByRole('img').hover();
+  await expect(firstMask.getByRole('tooltip').getByText('Tumor volume: 368.707 cm³', {exact:true})).toBeVisible();
   await expect(firstMask.getByRole('img', {name:'LUNG1-002 tumor mask overlay on middle tumor-bearing CT slice'})).toBeVisible();
-  await expect(firstMask.getByText('The orange overlay shows the tumor on a CT slice.')).toBeVisible();
   const features = page.getByRole('region', {name:'Radiomic features'});
-  await expect(features.getByText('We measured the tumors’ shape, CT intensity, and patterns in the scan.')).toBeVisible();
-  await expect(features.getByText('2 patients with measurements · 72 measurements per patient')).toBeVisible();
+  await features.getByText('Tumor measurements', {exact:true}).click();
+  await expect(features.getByText('Shape, intensity, and texture.')).toBeVisible();
+  await expect(features.getByText('72 per patient')).toBeVisible();
   const measurements = features.getByRole('table', {name:'Feature measurements'});
   await expect(measurements).toBeHidden();
-  await features.getByText('View details', {exact:true}).click();
+  await features.getByRole('button', {name:'View all',exact:true}).click();
   await expect(measurements).toBeVisible();
   await expect(measurements.getByRole('columnheader', {name:'Average CT intensity', exact:true})).toBeVisible();
   await expect(measurements.getByRole('button', {name:'About Average CT intensity'})).toHaveCount(0);
@@ -49,7 +50,6 @@ test('curated execution is immediately inspectable without launching a visitor r
   await expect(chart.getByText('155', {exact:true})).toBeVisible();
   await expect(features.getByText(/original_firstorder_/)).toHaveCount(0);
   await expect(results.getByRole('img', {name:'Estimated percentage of patients still alive over time'})).toBeVisible();
-  await expect(results.getByText(/One patient died at .* and the other at .* after follow-up began/)).toBeVisible();
   await features.getByRole('button', {name:'Inspect LUNG1-009',exact:true}).click();
   await expect(features.getByRole('heading', {name:'LUNG1-009 feature details'})).toBeVisible();
   await page.locator('summary').getByText('Run events', {exact:true}).click();
@@ -57,6 +57,7 @@ test('curated execution is immediately inspectable without launching a visitor r
   await expect(timeline.first()).toContainText('plan');
   await expect(timeline.last()).toContainText('done');
   expect(launches).toBe(0);
+  await page.getByRole('button',{name:'Examples',exact:true}).first().click();
   await page.getByRole('button',{name:'History',exact:true}).click();
   await expect(page.getByText('No saved terminal runs', {exact:true})).toBeVisible();
 });

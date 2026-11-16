@@ -57,10 +57,12 @@ test("scan flags and feature failures remain visible when an interrupted run is 
     await expect(checks.getByRole("article").filter({ hasText: patientIds[2] })).toContainText("Not checked");
 
     const masks = root.getByRole("region", { name: "Tumor masks" });
+    await masks.locator("summary").first().click();
     await expect(masks.getByText("A tumor mask was created from the CT scan.")).toBeVisible();
     await expect(masks.getByText("Tumor volume: 12.5 cm³")).toBeVisible();
 
     const features = root.getByRole("region", { name: "Radiomic features" });
+    await features.locator("summary").first().click();
     await expect(features.getByText("We couldn’t measure the tumors from these scans.")).toBeVisible();
     const failure = features.getByRole("article").filter({ hasText: patientIds[1] });
     await expect(failure.getByText("Could not calculate texture measurements")).toBeVisible();

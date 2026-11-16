@@ -42,7 +42,7 @@ def _concordance(rows):
         return None,'No comparable outcome pairs (recorded events and follow-up do not permit concordance).'
 
 
-def evaluate_scores(scores, outcomes, *, bootstrap_samples=0, seed=1729):
+def evaluate_scores(scores, outcomes, *, bootstrap_samples=0, seed=1729, include_follow_up=False):
     joined,excluded=join_outcomes([p['patient_id'] for p in scores],outcomes)
     by_id={p['patient_id']:p['values'] for p in scores}
     rows=[{**r,**by_id[r['patient_id']]} for r in joined]
@@ -64,8 +64,15 @@ def evaluate_scores(scores, outcomes, *, bootstrap_samples=0, seed=1729):
         uncertainty.update({'method':'patient-level nonparametric percentile bootstrap, 95% interval; NumPy default_rng PCG64; unestimable resamples omitted and counted; linear quantiles',
             'seed':seed,'requested_samples':bootstrap_samples,'estimable_samples':len(estimates),'unestimable_samples':bootstrap_samples-len(estimates),
             'interval':np.quantile(estimates,[.025,.975],method='linear').tolist() if len(estimates)>=2 else None})
-    return {'scope':'selected cohort — exploratory','c_index':cindex,'unavailable_reason':reason,'method':C_INDEX_METHOD,
+    result = {'scope':'selected cohort — exploratory','c_index':cindex,'unavailable_reason':reason,'method':C_INDEX_METHOD,
         'selected_count':len(scores),'evaluated_count':len(rows),'evaluated_patients':[r['patient_id'] for r in rows],
         'event_count':sum(r['event'] for r in rows),'censored_count':sum(1-r['event'] for r in rows),'exclusions':excluded,
         'time_unit':'days','curves':curves,'curve_context':('No usable recorded outcomes; observed-survival curves unavailable.' if not curves else 'Only one model-risk group is populated; a two-group comparison is unavailable.' if len(curves)==1 else 'Observed survival by fixed development-median model-risk group; separation is not guaranteed.'),
         'uncertainty':uncertainty}
+    if include_follow_up:
+        result['patient_follow_up'] = [
+            {'patient_id': row['patient_id'], 'duration': row['duration'],
+             'death_recorded': bool(row['event']), 'group': row['risk_group']}
+            for row in rows
+        ]
+    return result

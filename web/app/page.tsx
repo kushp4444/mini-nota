@@ -259,7 +259,12 @@ export default function Home() {
     if (!response.ok) throw Error('Cancellation was not confirmed. Please retry; processing may still be active.');
   }
   return (
-    <div className="shell">
+    <div className={view === "Examples" && example ? "shell example-layout" : "shell"}>
+      {view === "Examples" && example && <header className="example-masthead">
+        <button className="example-wordmark" onClick={() => setView("Patients")}>Mini-Nota</button>
+        <nav aria-label="Example sections"><a href="#results">Results</a><a href="#scans">Scans</a><a href="#measurements">Measurements</a><a href="#record">Run record</a></nav>
+        <button className="example-return" onClick={() => { setExample(undefined); }}>Examples</button>
+      </header>}
       <aside className="nav" aria-label="Workspace">
         <div className="brand">
           <div>
@@ -294,13 +299,13 @@ export default function Home() {
             Public Lung1 · {catalog.some((p) => p.fixture) ? "fixture library" : "held-out library"}
           </div>
         </header>
-        <div className="disclaimer">
+        {!(view === "Examples" && example) && <div className="disclaimer">
           Public de-identified Lung1 data · Demonstration only · Not a medical
           device or medical advice.
-        </div>
+        </div>}
         <main id="main-content">
-          <section className="center" aria-labelledby="page-heading">
-            <div className="page-title">
+          <section className="center" aria-labelledby={view === "Examples" && example ? "example-heading" : "page-heading"}>
+            <div className="page-title workspace-title">
               <div>
                 <h1 id="page-heading">
                   {view === "Patients"
@@ -376,12 +381,13 @@ export default function Home() {
               <>
                 {exampleError && <p role="alert">{exampleError}</p>}
                 {example ? <>
-                  <div className="card" role="note"><h2>{example.example.description}</h2>
-                    <p>Static curated example · read-only · never launches or resumes a visitor run.</p>
-                    <p>{example.patientIds.length} selected patients.</p>
-                    {example.example.faults.length > 0 && <><strong>Deliberately introduced fixture faults; the live library is unchanged.</strong><ul>{example.example.faults.map(fault => <li key={fault}>{fault}</li>)}</ul></>}
-
+                  <div className="example-run-heading" role="note">
+                    <div><h1 id="example-heading">{example.example.faults.length ? "Failure example" : "Completed example"}</h1>
+                      <p>{example.patientIds.length} patients. {example.example.faults.length ? "Recorded exclusions." : "One completed run."}</p>
+                    </div>
+                    <a className="example-record-link" href="#record">View run record</a>
                   </div>
+                  {example.example.faults.length > 0 && <div className="example-faults"><strong>Deliberately introduced fixture faults; the live library is unchanged.</strong><ul>{example.example.faults.map(fault => <li key={fault}>{fault}</li>)}</ul></div>}
                   <History runs={[]} selected={example} onSelect={() => {}} example />
                 </> : <p>Select a completed or failure example above.</p>}
               </>
@@ -493,22 +499,29 @@ export default function Home() {
               </>
             )}
           </section>
-          <aside className="agent card" aria-labelledby="agent-heading">
+          <aside id="record" className="agent card" aria-labelledby="agent-heading">
             <div className="agent-heading">
               <div>
-                <h2 id="agent-heading">Agent panel</h2>
+                <h2 id="agent-heading">{view === "Examples" && example ? "Run record" : "Agent panel"}</h2>
               </div>
             </div>
-            {displayedEvents.length > 0 && <ul className="run-stage-index" aria-label="Stages with results">
-              {[
-                ["qc", "Scan checks"],
-                ["masks", "Tumor masks"],
-                ["features", "Tumor measurements"],
-                ["score", "Risk scores"],
-              ].filter(([stage]) => displayedEvents.some(event =>
-                event.kind === "tool_result" && event.payload.stage === stage,
-              )).map(([stage, label]) => <li key={stage}>{label}</li>)}
-            </ul>}
+            {displayedEvents.some(event => event.kind === "tool_result" && event.payload.stage) &&
+              <details className="completed-stages-disclosure">
+                <summary>Completed stages</summary>
+                <ul className="completed-stages" role="list">
+                  {[
+                    ["qc", "Scan checks passed"],
+                    ["masks", "Tumor masks created"],
+                    ["features", "Tumor measurements extracted"],
+                    ["score", "Patients scored"],
+                    ["evaluation", "Follow-up compared"],
+                  ].filter(([stage]) => displayedEvents.some(event => {
+                    if (event.kind !== "tool_result" || event.payload.stage !== stage) return false;
+                    return stage === "evaluation" ? event.payload.evaluation?.c_index != null
+                      : event.payload.patient?.status === "success";
+                  })).map(([stage, label]) => <li key={stage}><span className="stage-check" aria-hidden="true">✓</span>{label}</li>)}
+                </ul>
+              </details>}
             <details key={view} open={view === "Analysis" || view === "Patients"}>
               <summary>Run events</summary>
             <div className="timeline" role="region" aria-label="Run events">
@@ -535,14 +548,14 @@ export default function Home() {
               )}
             </div>
             </details>
-            <div className="agent-foot">
+            {!(view === "Examples" && example) && <div className="agent-foot">
               Private run access · browser-local History
-            </div>
+            </div>}
           </aside>
         </main>
         <footer>
-          Mini-Nota{" "}
-          <span>Research workflow demonstration · Independent project</span>
+          {view === "Examples" && example ? <><span>Public de-identified Lung1 data</span><p>Demonstration only. Not a medical device or medical advice.</p></> : <>Mini-Nota{" "}
+          <span>Research workflow demonstration · Independent project</span></>}
         </footer>
       </div>
     </div>

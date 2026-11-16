@@ -17,6 +17,7 @@ test('saved examples present scan checks and overlays before optional structured
   await page.getByRole('button',{name:'View failure example'}).click();
   const saved=page.getByLabel('Saved run results');
   await expect(saved.getByRole('heading',{name:'Scan quality',exact:true})).toBeVisible();
+  await saved.getByLabel('Tumor masks',{exact:true}).locator('summary').first().click();
   await expect(saved.getByLabel('Tumor masks',{exact:true}).getByRole('img').first()).toBeVisible();
   await expect(saved.getByText('LUNG1-015: excluded by QC', {exact:false}).first()).toBeVisible();
   await expect(saved.locator('pre:visible')).toHaveCount(0);

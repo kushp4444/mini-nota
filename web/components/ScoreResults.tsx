@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import EvaluationResults, { type Evaluation } from "./EvaluationResults";
 import type { Audit } from "../lib/history";
 
-export function HeldOutBenchmark({events}:{events:Audit[]}) {
+export function HeldOutBenchmark({events, compact = false}:{events:Audit[]; compact?: boolean}) {
   const [full,setFull] = useState<Evaluation>();
   useEffect(()=>{let active=true;fetch('/api/graphql',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:'{ modelMetadata { evaluation { evaluation_version model_version scope c_index evaluated_count held_out_count event_count censored_count unavailable_reason time_unit exclusions { patient_id code message } uncertainty { context method interval estimable_samples unestimable_samples requested_samples } } } }'})}).then(r=>r.json()).then(r=>{if(active)setFull(r.data?.modelMetadata?.evaluation?.evaluation_version?r.data.modelMetadata.evaluation:undefined);}).catch(()=>{});return()=>{active=false;};},[]);
   const savedModel = events.find(e=>e.kind==='plan'&&e.payload.model)?.payload.model;
   const baseline = savedModel ? (savedModel.evaluation?.evaluation_version ? savedModel.evaluation : undefined) : full;
-  return <EvaluationResults evaluation={baseline} full />;
+  return <EvaluationResults evaluation={baseline} full compact={compact} />;
 }
 
 type PatientScore = {
@@ -26,10 +26,11 @@ function modelRiskGroup(group?: string) {
   return "Model-risk group unavailable";
 }
 
-export default function ScoreResults({ selectedIds, events, showBenchmark = true }: {
+export default function ScoreResults({ selectedIds, events, showBenchmark = true, compact = false }: {
   selectedIds: string[];
   events: Audit[];
   showBenchmark?: boolean;
+  compact?: boolean;
 }) {
   const exploratory: Evaluation | undefined = events.find(e => e.kind === "tool_result" && e.payload.stage === "evaluation")?.payload.evaluation;
   const scores: PatientScore[] = events.filter(e => e.kind === "tool_result" && e.payload.stage === "score")
@@ -54,27 +55,38 @@ export default function ScoreResults({ selectedIds, events, showBenchmark = true
     pairDays.set(rankedPair[earlier].patient_id, deathDays[0]);
     pairDays.set(rankedPair[1 - earlier].patient_id, deathDays[1]);
   }
+  const followUpById = new Map(exploratory?.patient_follow_up?.map(patient => [patient.patient_id, patient]));
   const patientSummary = scores.length > 0 ? (
+    <div className="patient-score-panel">
+      {scores.length > 3 && <div className="example-section-heading"><h4>Patient scores</h4><span>{scores.length} patients</span></div>}
       <div className="patient-risk-findings" tabIndex={0} role="region" aria-label="Patient score summary">
-        {scores.map(({ patient_id, values }) => <div key={patient_id}>
+        {scores.map(({ patient_id, values }) => {
+          const followUp = followUpById.get(patient_id);
+          const duration = followUp?.duration ?? pairDays.get(patient_id);
+          return <div key={patient_id}>
           <h4>{patient_id}</h4>
-          {pairDays.has(patient_id) && <p className="patient-followup"><span>Recorded death at</span> {pairDays.get(patient_id)} {exploratory?.time_unit}</p>}
+          {compact && values.risk_percentile != null ? <div className="example-patient-numbers">
+            <span><b>{Math.round(values.risk_percentile)}</b>Percentile</span>
+            {duration != null && <span><b>{duration}</b>{followUp ? "Days" : exploratory?.time_unit} {followUp?.death_recorded === false ? "observed" : "to recorded death"}</span>}
+          </div> : <>
+          {duration != null && <p className="patient-followup"><span>{followUp?.death_recorded === false ? "Last known follow-up" : "Recorded death at"}</span> {duration} {exploratory?.time_unit}</p>}
           <p className="result-caption">
             {values.risk_percentile != null ? `Reference percentile ${values.risk_percentile.toFixed(1)} · ` : ""}
             {modelRiskGroup(values.risk_group)}
-          </p>
-        </div>)}
-        <p className="result-caption">Percentiles compare scores with the patients the model learned from.</p>
+          </p></>}
+        </div>; })}
       </div>
+      <p className="result-caption">Percentiles compare scores with the patients the model learned from.</p>
+    </div>
   ) : undefined;
-  return <section className="card results score-results" aria-label="Frozen model risk scores">
-    <div className="card-heading">
+  return <section id={compact ? "results" : undefined} className="card results score-results" aria-label="Frozen model risk scores">
+    {!compact && <div className="card-heading">
       <h2>Model risk scores</h2>
       <span>{scores.length} / {selectedIds.length} scored</span>
-    </div>
+    </div>}
     {stopped && <p className="model-context" role="status">{terminal.message}</p>}
     {showBenchmark && <HeldOutBenchmark events={events} />}
-    <EvaluationResults evaluation={exploratory} ended={Boolean(terminal)} patientSummary={patientSummary} />
+    <EvaluationResults evaluation={exploratory} ended={Boolean(terminal)} patientSummary={patientSummary} compact={compact} />
     {scores.length ? <>
       <details className="result-details">
         <summary>View details</summary>

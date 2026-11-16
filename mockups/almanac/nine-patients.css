@@ -1,0 +1,115 @@
+.nine-result-grid { align-items: start; }
+.nine-patients {
+  display: block;
+  max-height: 300px;
+  overflow-y: auto;
+  padding-inline-end: 12px;
+  margin-top: 12px;
+  scrollbar-color: var(--muted) var(--sheet);
+}
+.nine-patients article { padding-block: 12px; }
+.nine-patients h3 { font-size: 16px; }
+.nine-patients .patient-numbers b { font-size: 23px; }
+.nine-patients:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.lower-curve { stroke: var(--ink); stroke-dasharray: 6 4; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 15px; }
+.chart-legend i { display: inline-block; width: 20px; margin-inline-end: 6px; border-top: 2px solid var(--accent); vertical-align: middle; }
+.chart-legend span + span i { border-top: 2px dashed var(--ink); }
+@media (min-width: 701px) {
+  .nine-scan-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }
+}
+.scan-disclosure { margin: 0; padding: 0; border: 0; }
+.scan-disclosure > summary { padding: 0; }
+.scan-disclosure > summary h2 { display: inline; }
+.scan-disclosure > summary span { float: inline-end; color: var(--muted); }
+.scan-search:not([hidden]), .measurement-search { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-block: 16px; }
+.scan-search input, .measurement-search input { width: min(100%, 18rem); min-height: 40px; padding: 8px 12px; border: 1px solid var(--firm); border-radius: 2px; background: var(--sheet); color: var(--ink); font: inherit; }
+.scan-search input:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.scan-search [role=status] { flex: 1 0 auto; margin-inline-start: auto; text-align: right; font-size: 15px; color: var(--muted); }
+.mock-measurement-table table { width: max-content; min-width: 100%; }
+.mock-measurement-table th, .mock-measurement-table td { white-space: nowrap; }
+.mock-measurement-table th:first-child { position: sticky; left: 0; background: var(--sheet); }
+.mock-feature-detail select { margin-inline-start: 8px; padding: 6px 10px; font: inherit; color: var(--ink); background: var(--sheet); border: 1px solid var(--firm); }
+.mock-feature-detail :focus-visible, .mock-measurement-table:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.mock-feature-detail dl { margin-bottom: 0; }
+.mock-feature-detail dl > div { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: baseline; gap: 16px; padding-block: 12px; border-top: 1px solid var(--rule); }
+.mock-feature-detail dd { margin: 0; font: 400 14px var(--figures); }
+.mock-feature-detail [role=tooltip] { width: min(260px, 65vw); left: 50%; right: auto; transform: translateX(-50%); z-index: 2; }
+.volume-heading { text-align: right; }
+.measurement-search .measurement-accent { background: var(--accent); border-color: var(--accent); color: var(--sheet); }
+#all-patient-measurements:not([hidden]) { margin-top: 16px; }
+.scan-view-all:not([hidden]) {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: min(100%, 320px);
+  height: auto;
+  min-height: 52px;
+  margin: 24px auto 0;
+  padding: 12px 18px;
+  border: 0;
+  border-radius: 0;
+  background: var(--ink);
+  color: var(--sheet);
+  font: 400 13px var(--figures);
+  cursor: pointer;
+}
+.scan-button-frame {
+  position: absolute;
+  inset: 7px;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--sheet),var(--sheet)) top left / 7px 1px,
+    linear-gradient(var(--sheet),var(--sheet)) top left / 1px 7px,
+    linear-gradient(var(--sheet),var(--sheet)) top right / 7px 1px,
+    linear-gradient(var(--sheet),var(--sheet)) top right / 1px 7px,
+    linear-gradient(var(--sheet),var(--sheet)) bottom left / 7px 1px,
+    linear-gradient(var(--sheet),var(--sheet)) bottom left / 1px 7px,
+    linear-gradient(var(--sheet),var(--sheet)) bottom right / 7px 1px,
+    linear-gradient(var(--sheet),var(--sheet)) bottom right / 1px 7px;
+  background-repeat: no-repeat;
+}
+.scan-button-icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: var(--ink);
+  background: var(--sheet);
+}
+.scan-view-all:hover { background: var(--firm); }
+.scan-view-all:active { transform: translateY(2px); }
+.scan-actions, .measurement-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.scan-actions button, .measurement-actions button { width: auto; height: auto; border-radius: 2px; cursor: pointer; }
+.scan-actions .measurement-accent { background: var(--accent); border-color: var(--accent); color: var(--sheet); }
+
+#measurement-status { margin: 16px 0 8px; text-align: left; }
+.mock-feature-detail #patient-feature-values { margin-top: 0; }
+
+
+.completed-stages { list-style: none; padding: 0; }
+.completed-stages li { display: flex; align-items: baseline; gap: 12px; }
+.stage-check {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 1.15em;
+  height: 1.15em;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  color: var(--accent);
+  font: 600 0.85em/1 var(--display);
+}
+.nine-scan-grid .scan-figure-caption { display: block; text-align: right; }
+.scan-caption { border: 0; padding: 0; margin: 0; font-size: 14px; }
+.scan-caption summary { min-height: 0; padding: 0; font-size: 16px; }
+.scan-caption p { margin: 4px 0 0 auto; color: var(--muted); line-height: 1.45; }
+.nine-scan-grid .scan-figure-caption { display: flex; justify-content: space-between; gap: 8px; text-align: left; }
+.scan-image { position: relative; }
+.scan-tooltip { display: none; pointer-events: none; position: absolute; z-index: 2; inset: auto 8px 8px; padding: 8px 12px; background: var(--ink); color: var(--sheet); font-size: 14px; }
+.scan-tooltip p { margin: 3px 0; line-height: 1.4; }
+.scan-image:hover .scan-tooltip, .scan-image:focus-within .scan-tooltip { display: block; }
+.scan-image img:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+#scans table tbody tr:hover > * { background: var(--paper); }

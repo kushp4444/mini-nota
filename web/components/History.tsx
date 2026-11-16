@@ -77,6 +77,7 @@ export default function History({
 }) {
   const [detailsOpen,setDetailsOpen] = useState(false);
   const retained = usePatientResults(selected);
+  const completedExample = Boolean(example && selected?.status === "completed" && selected.events.every(event => event.kind !== "gate"));
   const hasResult = (...stages: string[]) => selected?.events.some(
     event => event.kind === "tool_result" && stages.includes(event.payload.stage),
   );
@@ -103,7 +104,7 @@ export default function History({
           </p>
         </div>
       )}
-      <div className="history-list">
+      {!example && <div className="history-list">
         {runs.map((run) => (
           <button
             className="card history-entry"
@@ -119,30 +120,35 @@ export default function History({
             </small>
           </button>
         ))}
-      </div>
+      </div>}
       {selected && (
         <section className="card saved-run" aria-label="Saved run results">
-          <div className="card-heading">
+          {!example && <div className="card-heading">
             <div>
               <h2>Saved run · {selected.status}</h2>
               {selected.status !== "completed" && selected.reason && <p>{selected.reason}</p>}
             </div>
-          </div>
+          </div>}
           {hasResult("score", "evaluation")
-            ? <ScoreResults selectedIds={selected.patientIds} events={selected.events} showBenchmark={false} />
+            ? <ScoreResults selectedIds={selected.patientIds} events={selected.events} showBenchmark={false} compact={example} />
             : !hasResult("survival") && <EvaluationResults ended />}
-          <HeldOutBenchmark events={selected.events} />
-          <QCResults selectedIds={selected.patientIds} results={retained.qc||[]} ended />
-          <MaskResults selectedIds={selected.patientIds} results={retained.masks||[]} qcResults={retained.qc||[]} ended />
-          {selected.events.some(e => e.kind === "tool_result" && e.payload.stage === "features") && <FeatureResults selectedIds={selected.patientIds}
+          <HeldOutBenchmark events={selected.events} compact={example} />
+          <div id={example ? "scans" : undefined}>
+            <MaskResults selectedIds={selected.patientIds} results={retained.masks||[]} qcResults={retained.qc||[]} ended compact={example}>
+              {completedExample && <details className="result-inner-details scan-checks-details"><summary>Scan checks</summary><QCResults selectedIds={selected.patientIds} results={retained.qc||[]} ended /></details>}
+            </MaskResults>
+            {!completedExample && <QCResults selectedIds={selected.patientIds} results={retained.qc||[]} ended />}
+          </div>
+          <div id={example ? "measurements" : undefined}>{selected.events.some(e => e.kind === "tool_result" && e.payload.stage === "features") && <FeatureResults selectedIds={selected.patientIds}
             results={retained.features||[]}
             qcResults={retained.qc||[]}
-            maskResults={retained.masks||[]} ended />}
+            maskResults={retained.masks||[]} ended compact={example} />}</div>
           {gates.map((e, index) => <section key={e.id} aria-label="Recorded exclusion approval">
             <h3>Recorded exclusion disclosure</h3><p>{gateStatus(selected, e, gates[index + 1])}</p>
             <p>{e.payload.report.scoring_eligible_count} scoring-eligible patients · {e.payload.report.evaluation_eligible_count} evaluation-eligible patients</p>
             <table><thead><tr><th>Patient</th><th>Scoring</th><th>Evaluation</th><th>Reason</th></tr></thead><tbody>{e.payload.report.dispositions.map((p:any) => <tr key={p.patient_id}><td>{p.patient_id}</td><td>{p.scoring_eligible ? "Eligible" : "Excluded"}</td><td>{p.evaluation_eligible ? "Eligible" : "Excluded"}</td><td>{p.reasons.map((r:any) => r.message).join("; ") || "Usable features and outcome"}</td></tr>)}</tbody></table>
           </section>)}
+          <details className="saved-evidence" open={!completedExample}><summary>Saved evidence</summary>
           <details><summary>Selected patients ({selected.patientIds.length})</summary><p>{selected.patientIds.join(", ")}</p></details>
           <details className="structured-details" onToggle={e=>setDetailsOpen(e.currentTarget.open)}><summary>Structured stage details</summary>{detailsOpen && selected.events.filter(e=>e.kind==='tool_result'||e.payload.report).map(event=><div className="saved-result" key={event.id}><h4>{event.payload.stage} · {event.payload.patient?.patient_id||'cohort'}</h4><pre>{JSON.stringify(event.payload,null,2)}</pre></div>)}</details>
           {stageNames(selected.events).map((stage) => {
@@ -199,6 +205,7 @@ export default function History({
               </article>
             );
           })}
+          </details>
         </section>
       )}
     </div>

@@ -26,6 +26,7 @@ test("real held-out patient receives frozen model score and retains it in Histor
   await scores.locator(":scope > details > summary").click();
   await expect(table.getByText(data.modelMetadata.model_version, { exact: true })).toBeVisible();
   await expect(page.getByText('Saved in this browser',{exact:true})).toBeVisible();
+  await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
   await expect(page.getByLabel('Tumor masks',{exact:true}).getByRole('img')).toBeVisible();
   const saved = await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve,reject) => { const req=indexedDB.open('mini-nota-history');req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error); });
