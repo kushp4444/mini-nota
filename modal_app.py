@@ -13,7 +13,7 @@ dispatcher_image = modal.Image.from_dockerfile('deploy/Dockerfile.dispatcher', c
 
 @app.function(image=worker_image, secrets=[modal.Secret.from_name('mini-nota-worker')],
     cpu=(1, 1), memory=(4096, 6144),
-    timeout=1800, startup_timeout=600, retries=0, min_containers=0,
+    timeout=5400, startup_timeout=600, retries=0, min_containers=0,
     max_containers=2, buffer_containers=0, scaledown_window=2,
     single_use_containers=True)
 async def run_phase(operation_id: str):

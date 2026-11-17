@@ -6,6 +6,7 @@ manifest authorizes membership and paths; an S3 listing is never authority.
 import hashlib
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
@@ -141,10 +142,15 @@ class TrustedAssets:
         names=[name for name in self.files if name in STATIC or (scans and PurePosixPath(name).parts[1] in selected)]
         with TemporaryDirectory(prefix='mini-nota-assets-',dir=parent) as temporary:
             root=Path(temporary)
-            for name in names:
-                target=root/name; target.parent.mkdir(parents=True,exist_ok=True)
-                partial=target.with_name(target.name+'.part')
-                with partial.open('xb') as output:
+
+            def download(name):
+                target=root/name
+                target.parent.mkdir(parents=True,exist_ok=True)
+                with target.open('xb') as output:
                     verify_remote(client,bucket,self.key(name),self.files[name],output)
-                partial.replace(target)
+
+            # Limit in-flight downloads and wait for them before cleaning scratch.
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                for _ in executor.map(download,names,buffersize=8):
+                    pass
             yield root
