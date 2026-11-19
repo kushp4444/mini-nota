@@ -125,10 +125,14 @@ function SurvivalChart({curves,unit,compact,followUp = []}:{curves:Curve[];unit:
   const baseline = compact ? 230 : 220;
   const tickY = compact && curves.length > 1 ? 253 : compact ? 254 : 239;
   const y = (survival: number) => baseline - survival * 180;
-  const labelTimes = compact && curves.length > 1 ? [...new Set(drops.map(drop => drop.time))] : dropTimes;
+  const denseTimes = dropTimes.length > 6;
+  const tickStep = Math.max(1, 10 ** Math.floor(Math.log10(max)));
+  const labelTimes = denseTimes
+    ? Array.from({length: Math.floor(max / tickStep)}, (_, index) => (index + 1) * tickStep)
+    : dropTimes;
   const rowPositions: number[][] = [[x(0)]];
   const labels = labelTimes.map((time, index) => {
-    const preferred = compact && curves.length > 1 ? index % 2 : 0;
+    const preferred = !denseTimes && compact && curves.length > 1 ? index % 2 : 0;
     let row = preferred;
     while (rowPositions[row]?.some(position => Math.abs(position - x(time)) < 29)) row++;
     (rowPositions[row] ??= []).push(x(time));
@@ -156,7 +160,7 @@ function SurvivalChart({curves,unit,compact,followUp = []}:{curves:Curve[];unit:
         return <path key={patient.patient_id} d={`M${x(patient.duration)} ${y(survival) - 5}v10`}
           stroke={patient.group === "higher model risk" ? "var(--color-accent)" : "var(--color-ink-2)"} strokeWidth="2" />;
       })}
-      {drops.map(({ time, survival, previous }, index) => <line key={index}
+      {!denseTimes && drops.map(({ time, survival, previous }, index) => <line key={index}
         x1={x(time)} x2={x(time)} y1={y(survival === 0 ? previous : survival)} y2={y(0) + (compact && curves.length > 1 ? 8 : 0)}
         stroke="var(--color-muted)" strokeWidth="1.25" strokeDasharray="2 3"
       />)}
@@ -177,7 +181,7 @@ function SurvivalChart({curves,unit,compact,followUp = []}:{curves:Curve[];unit:
     </div> : !compact && <ul>{curves.map(curve => <li key={curve.group} style={{color: curve.group === "higher model risk" ? "var(--color-accent)" : "var(--color-ink-2)"}}>
       {curve.group === "higher model risk" ? "Higher scores" : "Lower scores"} · {curve.count} {curve.count === 1 ? "patient" : "patients"}, {curve.events} recorded {curve.events === 1 ? "death" : "deaths"}
     </li>)}</ul>}
-    {!compact && <p>A drop marks one or more recorded deaths. The dotted lines show when they happened.</p>}
+    {!compact && <p>A drop marks one or more recorded deaths.{!denseTimes && ' The dotted lines show when they happened.'}</p>}
 
   </>;
 }

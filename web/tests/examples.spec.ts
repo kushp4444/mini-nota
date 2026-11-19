@@ -5,23 +5,24 @@ test('curated execution is immediately inspectable without launching a visitor r
   await page.route('**/api/runs**', async route => { launches++; await route.abort(); });
   await page.goto('/');
   await page.getByRole('button', {name:'View completed example', exact:true}).click();
-  await expect(page.getByText('Completed example', {exact:true})).toBeVisible();
+  await expect(page.getByText('Completed example', {exact:true})).toBeVisible({timeout:30000});
+  await expect(page.getByText('82 patients. One completed run.', {exact:true})).toBeVisible();
   await expect(page.getByRole('region', {name:'Saved run results'})).toBeVisible();
   const results = page.getByRole('region', {name:'Saved run results'});
-  await expect(results.getByText('The higher-ranked patient lived longer.')).toBeVisible();
   const scoring = results.getByRole('region', {name:'Frozen model risk scores'});
-  for (const [id, days] of [["LUNG1-002", "155 days"], ["LUNG1-009", "131 days"]]) {
-    const patient = scoring.locator(".patient-risk-findings > div").filter({has: page.getByRole("heading", {name: id, exact: true})});
-    await expect(patient.getByText(`${days.split(" ")[0]}days to recorded death`, {exact: true})).toBeVisible();
-  }
+  const evaluation = scoring.getByRole('region', {name:'What happened to the patients you selected'});
+  await evaluation.getByText('How to read this result', {exact:true}).click();
+  await expect(evaluation.getByText(/82 patients with usable records/).first()).toBeVisible();
+  await expect(evaluation.getByText(/C-index 0\.606/).first()).toBeVisible();
   const scoreTable = scoring.getByRole('table', {name:'Patient risk scores', includeHidden:true});
   await expect(scoreTable).toBeHidden();
   await scoring.locator(':scope > details > summary').click();
   await expect(scoreTable).toBeVisible();
+  await expect(scoreTable.locator('tbody tr')).toHaveCount(82);
   await expect(page.getByText('Not a medical device or medical advice.', {exact:false})).toBeVisible();
   const masks = page.getByRole('region', {name:'Tumor masks'});
   await masks.locator('summary').first().click();
-  await expect(masks.getByText('2 passed')).toBeVisible();
+  await expect(masks.getByText('82 passed')).toBeVisible();
   const firstMask = masks.getByRole('article').filter({hasText:'LUNG1-002'});
   await firstMask.getByRole('img').hover();
   await expect(firstMask.getByRole('tooltip').getByText('Tumor volume: 368.707 cm³', {exact:true})).toBeVisible();
@@ -46,14 +47,13 @@ test('curated execution is immediately inspectable without launching a visitor r
   await expect(page.getByRole('tooltip')).toBeVisible();
   await page.keyboard.press('Escape');
   const chart = results.getByRole('img', {name:'Estimated percentage of patients still alive over time'});
-  await expect(chart.getByText('131', {exact:true})).toBeVisible();
-  await expect(chart.getByText('155', {exact:true})).toBeVisible();
+  await expect(chart).toBeVisible();
   await expect(features.getByText(/original_firstorder_/)).toHaveCount(0);
-  await expect(results.getByRole('img', {name:'Estimated percentage of patients still alive over time'})).toBeVisible();
   await features.getByRole('button', {name:'Inspect LUNG1-009',exact:true}).click();
   await expect(features.getByRole('heading', {name:'LUNG1-009 feature details'})).toBeVisible();
   await page.locator('summary').getByText('Run events', {exact:true}).click();
   const timeline = page.locator('.timeline .event');
+  await expect(timeline).toHaveCount(662);
   await expect(timeline.first()).toContainText('plan');
   await expect(timeline.last()).toContainText('done');
   expect(launches).toBe(0);
@@ -101,7 +101,7 @@ test('failure fixture discloses named exclusions and recorded approval without v
     }
     inspect(asset);
     const overlays = asset.events.filter((e:any) => e.payload.stage === 'masks' && e.kind === 'tool_result').flatMap((e:any) => e.payload.patient.artifacts);
-    expect(overlays.length).toBe(2);
+    expect(overlays.length).toBe(kind === 'success' ? 82 : 2);
     for (const overlay of overlays) expect(Buffer.from(overlay.data_base64,'base64').subarray(0,8)).toEqual(Buffer.from([137,80,78,71,13,10,26,10]));
   }
 });

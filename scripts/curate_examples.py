@@ -39,7 +39,7 @@ def export(snapshot, label, description, faults):
                           'export':'Terminal read-only product asset; no visitor control capability'}}
 
 
-def capture(raw, outcomes, bundle, output, label, description, faults, ports):
+def capture(raw, outcomes, bundle, output, label, description, faults, ports, selected):
     engine, runner = ports
     env = {**os.environ,'RAW_DIR':str(raw),'OUTCOMES_CSV':str(outcomes),'MODEL_BUNDLE':str(bundle),
            'ENGINE_SECRET':'isolated-curation-only','ENGINE_URL':f'http://127.0.0.1:{engine}',
@@ -54,12 +54,12 @@ def capture(raw, outcomes, bundle, output, label, description, faults, ports):
             for _ in range(200):
                 try: client.get('/'); break
                 except httpx.ConnectError: time.sleep(.1)
-            selected = ['LUNG1-002','LUNG1-009'] + (['LUNG1-015'] if faults else [])
             response = client.post('/runs',json={'patient_ids':selected}); response.raise_for_status()
             run = response.json()
             headers = {'Authorization':f"Bearer {run['secret']}"}
             approved = False
-            for _ in range(1200):
+            deadline = time.monotonic() + 5400
+            while time.monotonic() < deadline:
                 response = client.get(f"/runs/{run['id']}",headers=headers); response.raise_for_status()
                 snapshot = response.json()
                 if snapshot['status'] == 'waiting_approval' and not approved:
@@ -69,6 +69,8 @@ def capture(raw, outcomes, bundle, output, label, description, faults, ports):
                     response.raise_for_status(); approved = True
                 if snapshot['status'] in ['completed','failed','canceled']: break
                 time.sleep(.25)
+            else:
+                raise TimeoutError(f'{label} did not reach a terminal state')
             assert snapshot['status'] == 'completed', snapshot
             assert approved == bool(faults)
             result = export(snapshot,label,description,faults)
@@ -91,8 +93,9 @@ def main():
     parser.add_argument('--runner-port',type=int,default=8140)
     args = parser.parse_args()
     ports = (args.engine_port,args.runner_port)
+    held_out = json.loads((args.prepared/'partition.json').read_text())['held_out']
     capture(args.prepared/'raw',args.prepared/'outcomes.csv',args.bundle,args.output,'curated-success',
-            'Curated success · actual execution',[],ports)
+            'Completed run for the full held-out cohort',[],ports,held_out)
     with tempfile.TemporaryDirectory(prefix='mini-nota-curated-fault-') as directory:
         root = Path(directory)
         for patient in ['LUNG1-002','LUNG1-009']:
@@ -106,6 +109,7 @@ def main():
         capture(root,root/'outcomes.csv',args.bundle,args.output,'curated-failure',
                 'Failure-path fixture · actual execution with deliberately introduced faults',
                 ['LUNG1-015: synthetic malformed DICOM replaces this patient only in a temporary library.',
-                 'LUNG1-002: outcome deliberately removed from a temporary CSV; still scored, excluded only from selected-cohort evaluation.'],ports)
+                 'LUNG1-002: outcome deliberately removed from a temporary CSV; still scored, excluded only from selected-cohort evaluation.'],ports,
+                ['LUNG1-002','LUNG1-009','LUNG1-015'])
 
 if __name__ == '__main__': main()

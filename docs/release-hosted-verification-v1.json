@@ -1,0 +1,33 @@
+{
+  "selected": 82,
+  "stage_results": {
+    "qc": 82,
+    "masks": 82,
+    "features": 82,
+    "score": 82,
+    "evaluation": 1
+  },
+  "audit_events": 662,
+  "elapsed_seconds": 3679.936,
+  "model_version": "cox-v1-a8e2738d012902a6f717",
+  "feature_version": "8128e4fb6ac580c2b4983326fa729203a488681c56c4ccceb8fe0cf1847d23e3",
+  "c_index": 0.6057961981925833,
+  "event_count": 73,
+  "censored_count": 9,
+  "artifacts": 246,
+  "artifact_bytes": 12927708,
+  "portable_bytes": 18064319,
+  "max_abs_feature_difference": 1.1641532182693481e-10,
+  "max_abs_score_difference": 2.275957200481571e-15,
+  "network_path": "Vercel to Render, Neon, R2, and Modal",
+  "observed_peak_process_rss_bytes": 3530153984,
+  "memory_measurement": "Maximum observed summed process RSS sampled approximately every 15 seconds; not an instantaneous container peak.",
+  "modal_workspace_metered_usd_after_tests": 0.12,
+  "modal_workspace_billed_usd_after_tests": 0.0,
+  "modal_usage_limit_usd": 1.0,
+  "feature_tolerance": {
+    "relative": 1e-08,
+    "absolute": 1e-10
+  },
+  "score_absolute_tolerance": 1e-10
+}
