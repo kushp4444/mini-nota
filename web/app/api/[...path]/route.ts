@@ -47,15 +47,22 @@ async function proxy(
       }
       body = Buffer.concat(chunks).toString("utf8");
     }
+    const quotaCookie = (path.length === 1 || path[1] === "launch-context")
+      ? request.headers.get("Cookie")?.split(";").map(cookie => cookie.trim())
+          .find(cookie => cookie.startsWith("mini_nota_quota="))
+      : undefined;
     const response = await fetch(url, {
       method: request.method,
       headers: {
         "Content-Type": "application/json",
         Authorization: request.headers.get("Authorization") || "",
+        ...(quotaCookie ? { Cookie: quotaCookie } : {}),
       },
       body,
       cache: "no-store",
     });
+    const setCookie = path[1] === "launch-context" ? response.headers.get("Set-Cookie") : null;
+    const retryAfter = response.headers.get("Retry-After");
     return new Response(response.body, {
       status: response.status,
       headers: {
@@ -63,6 +70,8 @@ async function proxy(
           response.headers.get("Content-Type") || "application/json",
         "Cache-Control": "no-store",
         "X-Accel-Buffering": "no",
+        ...(setCookie ? { "Set-Cookie": setCookie } : {}),
+        ...(retryAfter ? { "Retry-After": retryAfter } : {}),
       },
     });
   } catch {

@@ -1,6 +1,6 @@
 # Durable run store
 
-Apply `python -m scripts.init_run_store` with `RUN_DATABASE_URL` set to the schema-owner connection before starting the dispatcher. Ordered migrations 001 and 002 are idempotent and does not touch `patient_catalog`, model/evaluation tables, scans or the frozen bundle. Runtime startup does not run DDL. Neon supports these ordinary PostgreSQL tables, row locks and transactions; no extension is required. Use TLS and provider-supported connection settings in deployment.
+Apply `python -m scripts.init_run_store` with `RUN_DATABASE_URL` set to the schema-owner connection before starting the dispatcher. Ordered migrations are idempotent and do not touch `patient_catalog`, model/evaluation tables, scans or the frozen bundle. Runtime startup does not run DDL. Neon supports these ordinary PostgreSQL tables, row locks and transactions; no extension is required. Use TLS and provider-supported connection settings in deployment.
 
 Use a dedicated schema (for example `run_store`) owned by a migration role, a `run_writer` login for the API/worker and an independent `catalog_reader` login for `CATALOG_DATABASE_URL` (Next GraphQL uses its existing `DATABASE_URL`). The runtime run-writer role must have its run schema as the default search path. Verify it on the actual Neon endpoint; transaction poolers may reject DSN `options` and must not depend on session SET. Local direct-connection tests use `options` only for isolated schemas. The catalog connection must have no access to that schema. Example grants, executed by an operator after creating the roles and schema:
 
@@ -8,6 +8,7 @@ Use a dedicated schema (for example `run_store`) owned by a migration role, a `r
 REVOKE ALL ON SCHEMA run_store FROM PUBLIC, catalog_reader;
 GRANT USAGE ON SCHEMA run_store TO run_writer;
 GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA run_store TO run_writer;
+GRANT DELETE ON TABLE run_store.run_launch_quota TO run_writer;
 REVOKE ALL ON ALL TABLES IN SCHEMA run_store FROM PUBLIC, catalog_reader;
 -- Give catalog_reader only the immutable deployed catalog tables:
 GRANT USAGE ON SCHEMA public TO catalog_reader;
@@ -19,3 +20,7 @@ Do not reuse a schema-owner/admin connection for the frontend catalog role. `vis
 Runs use a JSONB snapshot for pinned model/feature context, dispositions, gate checkpoints, extracted features and structured results; ordered audit events also have a unique `(run_id, sequence)` key. Revisions, row locks, operation fences and cancellation intent make snapshot/audit publication atomic. Binary content and `data_base64` are rejected by the repository; only verified object references enter PostgreSQL. Terminal records have no ephemeral runner retention expiry. Browser History still saves downloaded artifact bytes locally.
 
 Local development can set `LOCAL_ARTIFACT_DIR` to a private persistent test directory. This explicit filesystem adapter is unsuitable for Render's ephemeral disk. Production uses #17's `R2_RESULTS_*` storage configuration. Object uploads happen before publication; failed transactions can leave unreferenced objects for later collection. Never collect referenced objects merely because a dispatcher restarts.
+
+Hosted live runs allow any selection from the catalog and three new launches per browser in a rolling 24 hours. A signed, first-party cookie identifies the browser for this quota across tabs and reloads. Clearing cookies, using a separate profile, or using another browser starts a fresh allowance. The quota is per browser profile and is intended to limit ordinary demo use. PostgreSQL keeps the cookie identifier's digest and acceptance time for quota checks. Expired entries are removed on subsequent accepted public launches. Retries with the same launch nonce, approvals, cancellations, History, and examples do not add charges to the quota. An accepted launch still counts if the run is later canceled or fails.
+
+For authorized release verification requests, configure a separate random `RUN_OPERATOR_TOKEN` of at least 32 characters on the dispatcher and pass it as a bearer token to `POST /runs` over HTTPS. Keep it in operator tooling, outside browser code. For a local quota check, set `ENFORCE_LAUNCH_QUOTA=1` on a runner configured with the migrated durable store.

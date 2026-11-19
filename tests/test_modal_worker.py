@@ -2,6 +2,7 @@
 import asyncio
 from contextlib import contextmanager
 import os
+import secrets
 import pytest
 
 from test_service import client
@@ -34,11 +35,19 @@ def setup_run_store(monkeypatch, tmp_path):
     monkeypatch.setenv('RUN_DATABASE_URL', os.environ['DATABASE_URL'])
     monkeypatch.setenv('EXECUTION_BACKEND', 'deferred')
     monkeypatch.setenv('LOCAL_ARTIFACT_DIR', str(tmp_path/'objects'))
+    monkeypatch.setenv('RUN_OPERATOR_TOKEN', secrets.token_urlsafe(32))
+
+
+def launch(client, patient_ids):
+    response = client.post('/runs', json={'patient_ids': patient_ids},
+                           headers={'Authorization': f"Bearer {os.environ['RUN_OPERATOR_TOKEN']}"})
+    assert response.status_code == 201, response.text
+    return response.json()
 
 
 def test_phase_worker_completes_actual_imaging_without_dispatcher_task(client, monkeypatch, tmp_path):
     setup_run_store(monkeypatch, tmp_path)
-    receipt = client.post('/runs', json={'patient_ids':['TEST-CLEAN']}).json()
+    receipt = launch(client, ['TEST-CLEAN'])
     repo = runner.repository()
     operation = repo.operation(receipt['id'])
     from service.modal_worker import run_phase
@@ -99,7 +108,7 @@ def test_modal_gate_releases_compute_and_duplicate_approval_uses_scan_free_conti
     monkeypatch.setenv('EXECUTION_BACKEND','modal')
     provider = ProviderFixture()
     monkeypatch.setattr(runner,'execution_provider',lambda:provider)
-    receipt = client.post('/runs',json={'patient_ids':['TEST-CLEAN','TEST-PRIVACY']}).json()
+    receipt = launch(client, ['TEST-CLEAN','TEST-PRIVACY'])
     auth = {'Authorization':f"Bearer {receipt['secret']}"}
     path = '/runs/'+receipt['id']
     assets = LocalFixtureAssets(client.fixture_outcomes.parent)
@@ -129,7 +138,7 @@ def test_provider_outage_keeps_canceling_then_queued_input_cannot_compute(client
     monkeypatch.setenv('EXECUTION_BACKEND','modal')
     provider = ProviderFixture()
     monkeypatch.setattr(runner,'execution_provider',lambda:provider)
-    receipt = client.post('/runs',json={'patient_ids':['TEST-CLEAN']}).json()
+    receipt = launch(client, ['TEST-CLEAN'])
     auth = {'Authorization':f"Bearer {receipt['secret']}"}
     path = '/runs/'+receipt['id']
     provider.outage = True
@@ -152,7 +161,7 @@ def test_ambiguous_spawn_worker_self_registers_and_restart_preserves_saved_compl
     provider = ProviderFixture()
     provider.lose_response = True
     monkeypatch.setattr(runner,'execution_provider',lambda:provider)
-    receipt = client.post('/runs',json={'patient_ids':['TEST-CLEAN']}).json()
+    receipt = launch(client, ['TEST-CLEAN'])
     auth = {'Authorization':f"Bearer {receipt['secret']}"}
     path = '/runs/'+receipt['id']
     assets = LocalFixtureAssets(client.fixture_outcomes.parent)
@@ -172,7 +181,7 @@ def test_confirmed_provider_loss_is_explicit_interruption_never_lease_takeover(c
     monkeypatch.setenv('EXECUTION_BACKEND','modal')
     provider = ProviderFixture()
     monkeypatch.setattr(runner,'execution_provider',lambda:provider)
-    receipt = client.post('/runs',json={'patient_ids':['TEST-CLEAN']}).json()
+    receipt = launch(client, ['TEST-CLEAN'])
     auth = {'Authorization':f"Bearer {receipt['secret']}"}
     path = '/runs/'+receipt['id']
     call_id, call = next(iter(provider.calls.items()))
@@ -191,7 +200,7 @@ def test_cancel_waits_for_every_phase_input_termination_ack(client, monkeypatch,
     monkeypatch.setenv('EXECUTION_BACKEND','modal')
     provider = ProviderFixture()
     monkeypatch.setattr(runner,'execution_provider',lambda:provider)
-    receipt = client.post('/runs',json={'patient_ids':['TEST-CLEAN','TEST-PRIVACY']}).json()
+    receipt = launch(client, ['TEST-CLEAN','TEST-PRIVACY'])
     auth = {'Authorization':f"Bearer {receipt['secret']}"}
     path = '/runs/'+receipt['id']
     asyncio.run(provider.complete(LocalFixtureAssets(client.fixture_outcomes.parent)))
@@ -213,7 +222,7 @@ def test_native_cancel_stops_owned_tool_and_rejects_late_publication(client, mon
     from concurrent.futures import ThreadPoolExecutor
     from test_backend_unit import alive, wait_for
     setup_run_store(monkeypatch,tmp_path)
-    receipt = client.post('/runs',json={'patient_ids':['TEST-CLEAN']}).json()
+    receipt = launch(client, ['TEST-CLEAN'])
     path = '/runs/'+receipt['id']
     auth = {'Authorization':f"Bearer {receipt['secret']}"}
     marker = tmp_path/'native-started.json'
@@ -286,7 +295,7 @@ def test_worker_s3_artifacts_are_saved_or_fail_explicitly_before_completion(clie
     monkeypatch.delenv('LOCAL_ARTIFACT_DIR',raising=False)
     if broken_bucket:
         monkeypatch.setenv('R2_RESULTS_BUCKET','explicit-nonexistent-bucket-fixture')
-    receipt = client.post('/runs',json={'patient_ids':['TEST-CLEAN']}).json()
+    receipt = launch(client, ['TEST-CLEAN'])
     path = '/runs/'+receipt['id']
     auth = {'Authorization':f"Bearer {receipt['secret']}"}
     from service.modal_worker import run_phase
@@ -317,7 +326,7 @@ def test_unclaimed_expired_provider_input_fails_instead_of_waiting_forever(clien
     monkeypatch.setenv('EXECUTION_BACKEND','modal')
     provider = ProviderFixture()
     monkeypatch.setattr(runner,'execution_provider',lambda:provider)
-    receipt = client.post('/runs',json={'patient_ids':['TEST-CLEAN']}).json()
+    receipt = launch(client, ['TEST-CLEAN'])
     next(iter(provider.calls.values()))['status'] = 'expired'
     saved = client.get('/runs/'+receipt['id'],headers={'Authorization':f"Bearer {receipt['secret']}"}).json()
     assert saved['status'] == 'failed'
@@ -333,7 +342,7 @@ def test_provider_interruption_retries_when_terminal_audit_write_fails(client, m
     monkeypatch.setenv('EXECUTION_BACKEND', 'modal')
     provider = ProviderFixture()
     monkeypatch.setattr(runner, 'execution_provider', lambda: provider)
-    receipt = client.post('/runs', json={'patient_ids': ['TEST-CLEAN']}).json()
+    receipt = launch(client, ['TEST-CLEAN'])
     path = '/runs/' + receipt['id']
     auth = {'Authorization': f"Bearer {receipt['secret']}"}
     call_id, call = next(iter(provider.calls.items()))
@@ -376,7 +385,7 @@ def test_worker_diagnostic_keeps_run_recoverable_until_terminal_audit_commits(cl
     monkeypatch.setenv('EXECUTION_BACKEND', 'modal')
     provider = ProviderFixture()
     monkeypatch.setattr(runner, 'execution_provider', lambda: provider)
-    receipt = client.post('/runs', json={'patient_ids': ['TEST-CLEAN']}).json()
+    receipt = launch(client, ['TEST-CLEAN'])
     path = '/runs/' + receipt['id']
     auth = {'Authorization': f"Bearer {receipt['secret']}"}
     call_id, call = next(iter(provider.calls.items()))
@@ -412,7 +421,7 @@ def test_dispatch_exhaustion_only_fails_unclaimed_unconfirmed_work(client, monke
     provider = ProviderFixture()
     monkeypatch.setattr(runner, 'execution_provider', lambda: provider)
     provider.lose_response = True
-    receipt = client.post('/runs', json={'patient_ids': ['TEST-CLEAN']}).json()
+    receipt = launch(client, ['TEST-CLEAN'])
     path = '/runs/' + receipt['id']
     auth = {'Authorization': f"Bearer {receipt['secret']}"}
 

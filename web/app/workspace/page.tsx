@@ -9,7 +9,7 @@ import usePatientResults from "../../components/usePatientResults";
 import MissingArtifact, { type ArtifactRecovery } from "../../components/MissingArtifact";
 import { useEffect, useRef, useState } from "react";
 import History from "../../components/History";
-import { recoverLaunch, StoppedLaunch } from "../../lib/launch";
+import { LaunchNotStarted, recoverLaunch, StoppedLaunch } from "../../lib/launch";
 import { reconnectRun } from "../../lib/reconnect";
 import CancelRun from "../../components/CancelRun";
 import { browserRun, watchBrowserRun, reserveBrowserRun, attachBrowserRun, releaseBrowserRun, pendingLaunch, reclaimBrowserRun, type PendingLaunch } from "../../lib/browser-run";
@@ -225,7 +225,12 @@ export default function Workspace() {
       setLaunchPending(undefined);
       await follow(savedRun);
     } catch (e) {
-      if (e instanceof StoppedLaunch) {
+      if (e instanceof LaunchNotStarted) {
+        releaseBrowserRun(launch.nonce);
+        setLaunchPending(undefined);
+        setStatus("idle");
+        setView("Patients");
+      } else if (e instanceof StoppedLaunch) {
         releaseBrowserRun(launch.nonce);
         setLaunchPending(undefined);
         const failed = {...createSavedRun({id:`launch-${launch.nonce}`,secret:"",status:"failed"},launch.patientIds), reason:e.message};

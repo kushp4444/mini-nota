@@ -13,12 +13,12 @@ from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from .catalog import patients, model_metadata
 from .audit import append_event, last_sequence
-from .run_repository import RunRepository, Conflict
+from .run_repository import RunRepository, Conflict, LaunchQuotaExceeded
 
 tool_transport = ContextVar("tool_transport", default=None)
 
@@ -436,8 +436,33 @@ def health():
     return {'status':'ok'}
 
 @app.get('/runs/launch-context')
-def launch_context():
+def launch_context(request: Request, response: Response):
+    response.headers['Cache-Control'] = 'no-store'
+    if quota_enabled() and not visitor_digest(request):
+        identity = secrets.token_hex(32)
+        response.set_cookie('mini_nota_quota', f'{identity}.{quota_signature(identity)}',
+                            max_age=365*86400, httponly=True, samesite='lax',
+                            secure=request.url.scheme == 'https' or os.environ.get('EXECUTION_BACKEND') == 'modal')
     return {'worker_context': WORKER_CONTEXT}
+
+def quota_enabled():
+    return os.environ.get('EXECUTION_BACKEND') == 'modal' or os.environ.get('ENFORCE_LAUNCH_QUOTA') == '1'
+
+def quota_signature(identity):
+    return hmac.new(os.environ['CHECKPOINT_SIGNING_KEY'].encode(),
+                    ('launch-quota:' + identity).encode(), hashlib.sha256).hexdigest()
+
+def visitor_digest(request):
+    identity, _, signature = request.cookies.get('mini_nota_quota', '').partition('.')
+    if len(identity) != 64 or len(signature) != 64 or not identity.isascii() or not signature.isascii():
+        return None
+    expected = quota_signature(identity)
+    return hashlib.sha256(identity.encode()).hexdigest() if hmac.compare_digest(expected, signature) else None
+
+def operator_launch(request):
+    token = os.environ.get('RUN_OPERATOR_TOKEN', '')
+    return len(token) >= 32 and hmac.compare_digest(
+        request.headers.get('Authorization', '').encode(), f'Bearer {token}'.encode())
 
 async def stop_lost_launch(run_id):
     # The engine confirms its process is stopped and records a cancellation
@@ -454,8 +479,8 @@ async def stop_lost_launch(run_id):
     raise HTTPException(409, {'code': 'launch_interrupted', 'message': 'Temporary launch state is gone. Earlier engine work has been stopped; results never received may be lost. Start a new run for interrupted computation.'})
 
 @app.post('/runs', status_code=201)
-async def create_run(selection: Selection):
-    if os.environ.get('EXECUTION_BACKEND') == 'modal' and repository() is None:
+async def create_run(selection: Selection, request: Request):
+    if quota_enabled() and repository() is None:
         raise HTTPException(503,'Durable remote execution is not configured')
     ids = selection.patient_ids
     nonce = selection.launch_nonce
@@ -480,20 +505,29 @@ async def create_run(selection: Selection):
         if run is None:
             await stop_lost_launch(old['id'])
         return {'id': run['id'], 'secret': run['secret'], 'status': run['status']}
+    quota_visitor = None
+    if quota_enabled() and not operator_launch(request):
+        quota_visitor = visitor_digest(request)
+        if not quota_visitor:
+            raise HTTPException(428, 'Open the launch context to initialize your browser’s live run allowance')
     known = {p['id'] for p in await asyncio.to_thread(patients)}
     if not ids or len(ids) != len(set(ids)) or not set(ids).issubset(known):
         raise HTTPException(422, 'Select one or more distinct patients from the available catalog')
     model = await asyncio.to_thread(model_metadata)
     # Recheck after all lookups: concurrent retries create only one task.
     if not repo and nonce and nonce in launches:
-        return await create_run(selection)
+        return await create_run(selection, request)
     run = {'id': run_id, 'secret': durable_secret(run_id) if repo else secrets.token_urlsafe(32), 'status': 'running',
            'patient_ids': ids, 'patients': [], 'model':model, 'eligibility':None, 'checkpoint':None, 'evaluation':None, 'stage_results': {'qc': [], 'masks': [], 'features': [], 'score': []}, 'events': [], 'touched': time.monotonic()}
     if repo:
         try:
-            run, created = repo.create(run,nonce)
+            run, created = await asyncio.to_thread(repo.create, run, nonce, quota_visitor=quota_visitor)
         except Conflict as exc:
             raise HTTPException(409,str(exc))
+        except LaunchQuotaExceeded as exc:
+            retry_seconds = max(1, math.ceil(exc.retry_at.timestamp() - time.time()))
+            raise HTTPException(429, {'code':'launch_quota', 'retry_at':exc.retry_at.isoformat()},
+                                headers={'Retry-After':str(retry_seconds)})
         if not created:
             return {'id':run['id'],'secret':run['secret'],'status':run['status']}
     if not repo or os.environ.get('EXECUTION_BACKEND','local') == 'local':

@@ -323,3 +323,58 @@ def test_valid_legacy_browser_gate_imports_into_durable_store(client, monkeypatc
     assert client.post(path+'/approve',json=approval,headers=auth).status_code == 200
     client.get(path+'/events?after='+str(saved['last_sequence']),headers=auth)
     assert client.get(path+'/results',headers=auth).json()['status'] == 'completed'
+
+
+def test_public_launch_quota_is_atomic_and_replays_are_free(client, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    import secrets
+    import psycopg
+    from service.run_repository import RunRepository
+
+    database = os.environ['DATABASE_URL']
+    RunRepository(database).initialize()
+    monkeypatch.setenv('RUN_DATABASE_URL', database)
+    monkeypatch.setenv('EXECUTION_BACKEND', 'deferred')
+    monkeypatch.setenv('ENFORCE_LAUNCH_QUOTA', '1')
+    operator_key = secrets.token_urlsafe(32)
+    monkeypatch.setenv('RUN_OPERATOR_TOKEN', operator_key)
+    cohort = [f'QUOTA-{i:02}' for i in range(82)]
+    with psycopg.connect(database) as conn:
+        with conn.cursor() as cursor:
+            cursor.executemany('INSERT INTO patient_catalog VALUES (%s,%s,true)', [(p, p) for p in cohort])
+
+    def launch(nonce, headers=None):
+        return client.post('/runs', json={'patient_ids': cohort, 'launch_nonce': nonce}, headers=headers)
+
+    try:
+        assert launch(secrets.token_urlsafe(32)).status_code == 428
+        context = client.get('/runs/launch-context')
+        assert context.status_code == 200
+        assert 'HttpOnly' in context.headers['set-cookie']
+        assert 'set-cookie' not in client.get('/runs/launch-context').headers
+        nonces = [secrets.token_urlsafe(32) for _ in range(6)]
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            responses = list(pool.map(launch, nonces))
+        assert sorted(r.status_code for r in responses) == [201] * 3 + [429] * 3
+        accepted, receipt = next((n, r.json()) for n, r in zip(nonces, responses) if r.status_code == 201)
+        assert launch(accepted).json() == receipt
+        blocked = launch(secrets.token_urlsafe(32), {'Authorization': 'Bearer wrong-token'})
+        assert blocked.status_code == 429
+        assert 0 < int(blocked.headers['Retry-After']) <= 86400
+        assert blocked.json()['detail']['retry_at']
+        authorized = launch(secrets.token_urlsafe(32), {'Authorization': f'Bearer {operator_key}'})
+        assert authorized.status_code == 201
+        assert launch(secrets.token_urlsafe(32)).status_code == 429
+
+        # Advance the fixture's oldest acceptance beyond the rolling window.
+        with psycopg.connect(database) as conn:
+            conn.execute("UPDATE run_launch_quota SET accepted_at=now()-interval '24 hours 1 second' WHERE id=(SELECT id FROM run_launch_quota ORDER BY accepted_at LIMIT 1)")
+        assert launch(secrets.token_urlsafe(32)).status_code == 201
+        assert launch(secrets.token_urlsafe(32)).status_code == 429
+        client.cookies.clear()
+        client.get('/runs/launch-context')
+        assert launch(secrets.token_urlsafe(32)).status_code == 201
+    finally:
+        client.cookies.clear()
+        with psycopg.connect(database) as conn:
+            conn.execute("DELETE FROM patient_catalog WHERE patient_id LIKE 'QUOTA-%'")

@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import uuid
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 
 import psycopg
@@ -23,6 +24,12 @@ DISPATCH_BACKOFF_SECONDS = 30
 
 class Conflict(Exception):
     pass
+
+
+class LaunchQuotaExceeded(Exception):
+    def __init__(self, retry_at):
+        super().__init__('Live run quota reached')
+        self.retry_at = retry_at
 
 
 class RunRepository:
@@ -49,7 +56,7 @@ class RunRepository:
             run['secret'] = secret
         return run
 
-    def create(self, run, nonce=None, phase='imaging'):
+    def create(self, run, nonce=None, phase='imaging', *, quota_visitor=None):
         """Atomic launch receipt and dispatch intent. Returns (snapshot, created)."""
         with psycopg.connect(self.database_url, connect_timeout=10) as conn:
             inserted = conn.execute('INSERT INTO visitor_runs(id,launch_nonce,secret_digest,document) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING RETURNING id',
@@ -59,10 +66,30 @@ class RunRepository:
                 raise Conflict('Launch identity was already used for a different selection or capability')
             created = bool(inserted)
             if created:
+                if quota_visitor:
+                    self._charge_launch(conn, quota_visitor)
                 if phase:
                     self._operation(conn,run['id'],phase,0)
                 conn.execute('UPDATE visitor_runs SET revision=1 WHERE id=%s', (run['id'],))
             return {**row[1], 'secret':run['secret'], '_revision':1 if created else row[2]}, created
+
+    @staticmethod
+    def _charge_launch(conn, visitor):
+        # Serialize the rolling check across dispatchers. The run receipt,
+        # charge and dispatch intent commit together or all roll back.
+        conn.execute('SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))',
+                     ('launch-quota:' + visitor,))
+        now = conn.execute('SELECT clock_timestamp()').fetchone()[0]
+        window = timedelta(hours=24)
+        cutoff = now - window
+        count, oldest = conn.execute(
+            'SELECT count(*), min(accepted_at) FROM run_launch_quota WHERE visitor_digest=%s AND accepted_at>%s',
+            (visitor, cutoff),
+        ).fetchone()
+        if count >= 3:
+            raise LaunchQuotaExceeded(oldest + window)
+        conn.execute('DELETE FROM run_launch_quota WHERE accepted_at<=%s', (cutoff,))
+        conn.execute('INSERT INTO run_launch_quota(visitor_digest,accepted_at) VALUES (%s,%s)', (visitor, now))
 
     @staticmethod
     def document(run):
