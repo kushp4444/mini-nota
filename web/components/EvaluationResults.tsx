@@ -67,7 +67,7 @@ export default function EvaluationResults({ evaluation, full = false, ended = fa
         ? <div className="example-finding"><h4>The higher-ranked patient lived longer.</h4><p>The model got this pair’s order backward.</p></div>
         : showComparison ? <div className="example-finding">
           <h4>{earlierDrop ? "Survival fell sooner in the higher-score group." : "Survival by model score."}</h4>
-          {higherSurvival != null && lowerSurvival != null && <p>At day {comparisonDay}, estimated survival was {Math.round(higherSurvival * 100)}% versus {Math.round(lowerSurvival * 100)}%.</p>}
+          {higherSurvival != null && lowerSurvival != null && <p>At day {comparisonDay}, estimated survival from follow-up was <strong>{Math.round(higherSurvival * 100)}% for patients with higher model scores</strong> and <strong>{Math.round(lowerSurvival * 100)}% for patients with lower model scores</strong>.</p>}
         </div> : <p className="result-finding">{evaluationFinding(evaluation)}</p>}
       {!compact && <p className="result-caption">
         {evaluation.c_index == null ? "C-index unavailable" : `C-index ${evaluation.c_index.toFixed(3)}`}
@@ -92,16 +92,14 @@ export default function EvaluationResults({ evaluation, full = false, ended = fa
         {interval?.length === 2 && ` · 95% confidence interval ${interval[0].toFixed(3)}–${interval[1].toFixed(3)}`}
         {" · "}{evaluation.evaluated_count} {evaluation.evaluated_count === 1 ? "patient" : "patients"} with usable records · {evaluation.event_count} recorded {evaluation.event_count === 1 ? "death" : "deaths"} · {evaluation.censored_count} without a recorded death during follow-up
       </p>}
-      <p>{full
-        ? "These patients were set aside before the model learned. Your selection doesn’t change this test."
-        : "The model scores each selected patient separately. We compare those patients with each other using their scores and follow-up records. The patients the model learned from are used to explain where each score ranks."}</p>
+        {full && <p>These patients were set aside before the model learned. Your selection doesn’t change this test.</p>}
         {showComparison && <p>{evaluationFinding(evaluation)}</p>}
         {evaluation.patient_follow_up?.some(patient => !patient.death_recorded) && <p>Short marks show the last known follow-up without a recorded death.</p>}
-        <p>C-index checks how often the model gave a higher score to the patient who died sooner, among people whose records could be compared. A score of 0.5 is what you’d expect from guessing.</p>
+        <p>Take two patients whose records tell us who died sooner. Did the model give that patient the higher risk score? The C-index sums up how often the model got that order right. Guessing gives about 0.5 overall.</p>
+        <p>If both patients got the same risk score, the model didn’t pick an order. That pair adds half a point to the tally.</p>
         {evaluation.unavailable_reason && <p>{evaluation.unavailable_reason}</p>}
         {evaluation.model_version && <p>Model {evaluation.model_version}</p>}
         {evaluation.evaluation_version && <p>Evaluation {evaluation.evaluation_version}</p>}
-        <p>If two patients have the same score, the comparison counts as half right.</p>
         {evaluation.uncertainty?.requested_samples != null && <p>
           {evaluation.uncertainty.estimable_samples} samples with a result out of {evaluation.uncertainty.requested_samples} samples
           {" · "}{evaluation.uncertainty.unestimable_samples} without a result

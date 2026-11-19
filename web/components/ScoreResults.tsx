@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import EvaluationResults, { type Evaluation } from "./EvaluationResults";
 import type { Audit } from "../lib/history";
 
@@ -16,7 +16,6 @@ type PatientScore = {
     risk_score?: number;
     risk_percentile?: number | null;
     risk_group?: string;
-    model_version?: string;
   };
 };
 
@@ -32,11 +31,15 @@ export default function ScoreResults({ selectedIds, events, showBenchmark = true
   showBenchmark?: boolean;
   compact?: boolean;
 }) {
+  const [sortBy, setSortBy] = useState("run");
+  const scoreList = useRef<HTMLDivElement>(null);
   const exploratory: Evaluation | undefined = events.find(e => e.kind === "tool_result" && e.payload.stage === "evaluation")?.payload.evaluation;
   const scores: PatientScore[] = events.filter(e => e.kind === "tool_result" && e.payload.stage === "score")
     .map(e => e.payload.patient).filter(Boolean);
   const scoresById = new Map(scores.map(score => [score.patient_id, score.values]));
   const report = events.find(e => e.payload.stage === "eligibility" && e.payload.report)?.payload.report;
+  const developmentCount = events.find(e => e.kind === "plan" && e.payload.model)?.payload.model.development_count
+    ?? report?.model?.development_count;
   const terminal = events.find(e => e.kind === "done");
   const stopped = terminal && ["failed", "canceled", "interrupted"].includes(terminal.payload.status);
   const pairCurve = exploratory?.curves?.length === 1 ? exploratory.curves[0] : undefined;
@@ -56,27 +59,49 @@ export default function ScoreResults({ selectedIds, events, showBenchmark = true
     pairDays.set(rankedPair[1 - earlier].patient_id, deathDays[1]);
   }
   const followUpById = new Map(exploratory?.patient_follow_up?.map(patient => [patient.patient_id, patient]));
+  const scoreRows = scores.map(({ patient_id, values }) => {
+    const followUp = followUpById.get(patient_id);
+    const duration = followUp?.duration ?? pairDays.get(patient_id);
+    const deathDays = followUp?.death_recorded === false ? undefined : duration;
+    return { patient_id, values, followUp, duration, deathDays };
+  });
+  const hasDeathDays = scoreRows.some(row => row.deathDays != null);
+  if (sortBy === "percentile") {
+    scoreRows.sort((a, b) => (b.values.risk_percentile ?? -1) - (a.values.risk_percentile ?? -1));
+  } else if (sortBy === "death") {
+    scoreRows.sort((a, b) => (a.deathDays ?? Number.MAX_VALUE) - (b.deathDays ?? Number.MAX_VALUE));
+  }
   const patientSummary = scores.length > 0 ? (
     <div className="patient-score-panel">
       {scores.length > 3 && <div className="example-section-heading"><h4>Patient scores</h4><span>{scores.length} patients</span></div>}
-      <div className="patient-risk-findings" tabIndex={0} role="region" aria-label="Patient score summary">
-        {scores.map(({ patient_id, values }) => {
-          const followUp = followUpById.get(patient_id);
-          const duration = followUp?.duration ?? pairDays.get(patient_id);
-          return <div key={patient_id}>
+      {scores.length > 1 && <label className="patient-score-sort">Sort by
+        <select value={sortBy === "death" && !hasDeathDays ? "run" : sortBy} onChange={event => {
+          setSortBy(event.target.value);
+          if (scoreList.current) scoreList.current.scrollTop = 0;
+        }}>
+          <option value="run">Run order</option>
+          <option value="percentile">Risk percentile (highest first)</option>
+          {hasDeathDays && <option value="death">Days to recorded death (earliest first)</option>}
+        </select>
+      </label>}
+      <div ref={scoreList} className="patient-risk-findings" tabIndex={0} role="region" aria-label="Patient score summary">
+        {scoreRows.map(({ patient_id, values, followUp, duration }) => <div key={patient_id}>
           <h4>{patient_id}</h4>
           {compact && values.risk_percentile != null ? <div className="example-patient-numbers">
             <span><b>{Math.round(values.risk_percentile)}</b>Percentile</span>
-            {duration != null && <span><b>{duration}</b>{followUp ? "Days" : exploratory?.time_unit} {followUp?.death_recorded === false ? "observed" : "to recorded death"}</span>}
+            {duration != null && <span><b>{duration}</b>{followUp?.death_recorded === false ? "Days of follow-up · no death recorded" : "Days to recorded death"}</span>}
           </div> : <>
           {duration != null && <p className="patient-followup"><span>{followUp?.death_recorded === false ? "Last known follow-up" : "Recorded death at"}</span> {duration} {exploratory?.time_unit}</p>}
           <p className="result-caption">
             {values.risk_percentile != null ? `Reference percentile ${values.risk_percentile.toFixed(1)} · ` : ""}
             {modelRiskGroup(values.risk_group)}
           </p></>}
-        </div>; })}
+        </div>)}
       </div>
       <p className="result-caption">Percentiles compare scores with the patients the model learned from.</p>
+      {exploratory && <p className="result-caption">Higher risk scores should generally go with shorter survival. {developmentCount != null
+        ? `The model learned from a limited set of ${developmentCount} patients. More representative training data could improve its ranking.`
+        : "Individual outcomes vary. More representative training data could improve the model’s ranking."}</p>}
     </div>
   ) : undefined;
   return <section id={compact ? "results" : undefined} className="card results score-results" aria-label="Frozen model risk scores">
@@ -96,7 +121,7 @@ export default function ScoreResults({ selectedIds, events, showBenchmark = true
         </p>}
         <div className="score-table" tabIndex={0} role="region" aria-label="Scrollable patient risk scores">
           <table aria-label="Patient risk scores">
-            <thead><tr><th>Patient</th><th>Risk score (log relative hazard)</th><th>Development percentile</th><th>Fixed model-risk group</th><th>Model version</th></tr></thead>
+            <thead><tr><th>Patient</th><th>Risk score (log relative hazard)</th><th>Development percentile</th><th>Fixed model-risk group</th></tr></thead>
             <tbody>{selectedIds.map(id => {
               const values = scoresById.get(id);
               return <tr key={id}>
@@ -104,7 +129,6 @@ export default function ScoreResults({ selectedIds, events, showBenchmark = true
                 <td>{values ? values.risk_score?.toPrecision(8) ?? "—" : "Not scored"}</td>
                 <td>{values?.risk_percentile != null ? values.risk_percentile.toFixed(1) : "—"}</td>
                 <td>{values?.risk_group || "—"}</td>
-                <td>{values?.model_version || "—"}</td>
               </tr>;
             })}</tbody>
           </table>

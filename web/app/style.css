@@ -1116,6 +1116,8 @@ tr.selected { background: var(--color-paper-2); }
 .patient-score-panel > .result-caption { margin-top: 8px; }
 .patient-score-panel > .example-section-heading { margin-bottom: 12px; }
 .patient-score-panel > .example-section-heading h4 { font-size: 20px; margin: 0; }
+.patient-score-sort { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 14px; }
+.patient-score-sort select { min-width: 0; max-width: 100%; padding: 6px 8px; border: 1px solid var(--color-rule-2); background: transparent; color: var(--color-ink); font: inherit; }
 .example-layout .patient-risk-findings:has(> div:nth-child(4)) { display: block; max-height: 300px; padding-inline-end: 12px; }
 .example-layout .patient-risk-findings:has(> div:nth-child(4)) > div { padding-block: 12px; }
 .example-layout .patient-risk-findings:has(> div:nth-child(4)) h4 { font-size: 16px; }

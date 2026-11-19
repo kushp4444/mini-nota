@@ -6,8 +6,14 @@ import type { MaskPatientResult } from "./MaskResults";
 
 export type FeaturePatientResult = MaskPatientResult & { feature_schema?: string[] };
 
+const intensityBounds = ["original_firstorder_Minimum", "original_firstorder_Maximum"];
+
 function measurementNames(result: FeaturePatientResult) {
   return result.feature_schema?.length ? result.feature_schema : Object.keys(result.values);
+}
+
+function intensityBoundsFirst(names: string[]) {
+  return [...intensityBounds.filter(name => names.includes(name)), ...names.filter(name => !intensityBounds.includes(name))];
 }
 
 /** Works on live or retained results; all downloads use locally owned bytes. */
@@ -24,7 +30,7 @@ export default function FeatureResults({selectedIds, results, qcResults, maskRes
   const [showAll, setShowAll] = useState(false);
   const successful = results.filter(result => result.status === "success");
   const failed = results.filter(result => result.status !== "success");
-  const schema = [...new Set(successful.flatMap(measurementNames))];
+  const schema = intensityBoundsFirst([...new Set(successful.flatMap(measurementNames))]);
   const matchingMeasurementCounts = schema.length && successful.every(result =>
     measurementNames(result).length === schema.length
   );
@@ -58,6 +64,7 @@ export default function FeatureResults({selectedIds, results, qcResults, maskRes
         {matchingMeasurementCounts ? <span>{schema.length} per patient</span> : null}
       </summary>
     <p className={compact ? "result-caption" : "result-finding"}>{compact && successful.length ? "Shape, intensity, and texture." : finding}</p>
+    {schema.some(name => intensityBounds.includes(name)) && <p className="result-caption">Normalized CT intensity uses the whole scan as a reference. Zero is the scan average. A value of +1 is one standard deviation above it.</p>}
     {(!compact || !!failed.length) && !!results.length && <p className="result-caption">
       {successful.length} {successful.length === 1 ? "patient" : "patients"} with measurements
       {matchingMeasurementCounts ? ` · ${schema.length} measurements per patient` : ""}
@@ -102,7 +109,7 @@ export default function FeatureResults({selectedIds, results, qcResults, maskRes
       </div>
       <p className={detail?.status === "failed" ? "error-text" : "muted"}>{disposition(selected)}</p>
       {detail?.status === "success" ? <dl className="feature-values">
-        {measurementNames(detail).map(name => <div key={name}><dt><FeatureMeasurementLabel name={name} /></dt><dd title={String(detail.values[name])}>{numeric(detail.values[name])}</dd></div>)}
+        {intensityBoundsFirst(measurementNames(detail)).map(name => <div key={name}><dt><FeatureMeasurementLabel name={name} /></dt><dd title={String(detail.values[name])}>{numeric(detail.values[name])}</dd></div>)}
       </dl> : null}
     </div>}
     </>}
