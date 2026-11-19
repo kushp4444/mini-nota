@@ -138,7 +138,6 @@ a:active { text-decoration-thickness: 2px; }
 .completed-section p { max-width: 42ch; }
 .completed-grid { align-items: center; }
 .run-links { justify-self: start; }
-.run-links p { max-width: 30ch; margin-top: var(--space-md); }
 footer { border-top: 1px solid var(--color-rule-2); }
 .footer-inner { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-lg); padding-block: var(--space-lg); }
 .footer-inner p { margin: 0; }

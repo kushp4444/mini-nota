@@ -22,7 +22,7 @@ export default function LandingPage() {
           <h1 id="hero-title">From CT scans<br className="desktop-break" />{" "}to risk rankings.</h1>
           <p>Follow a public Lung1 cohort from scan checks to survival-risk rankings.</p>
           <div className="actions">
-            <a className="btn btn-primary" href="#completed-run">View demo run</a>
+            <a className="btn btn-primary" href="/workspace">View demo run</a>
             <a className="btn btn-secondary" href="/workspace">Run your own analysis</a>
           </div>
         </div>
@@ -98,10 +98,7 @@ export default function LandingPage() {
             <h2 id="run-title">The completed run</h2>
             <p>Explore scans, measurements, risk rankings, and the decision log for all 82 held-out patients.</p>
           </div>
-          <div className="run-links">
-            <a className="btn btn-primary" href="/workspace">Open Mini-Nota</a>
-            <p>Choose <strong>View completed example</strong>.</p>
-          </div>
+          <a className="btn btn-primary run-links" href="/workspace">View demo run</a>
         </div>
       </section>
     </main>
