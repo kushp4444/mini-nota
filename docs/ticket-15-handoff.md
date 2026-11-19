@@ -1,6 +1,6 @@
 # Release checkpoint (#15; deployment architecture changed before completion)
 
-**This is a preserved pre-migration checkpoint, not a completed release.** The owner subsequently selected Vercel frontend, lightweight Render Free API/dispatcher, Neon Free patient metadata/features/results, Cloudflare R2 actual scans/saved results and Modal Functions for live heavy QC/masks/features/frozen-model processing. Explicit saved Neon/R2 persistence supersedes ADR0001's previous browser-only visitor persistence. Integration coordination owns the ADR/spec/task-graph update. No new provider implementation/provisioning, public deployment, account, paid resource, push or issue closure occurred here.
+This historical handoff records the local baseline before the migration to [ADR 0003](adr/0003-modal-compute-with-durable-results.md). See the [release checkpoint](release-checkpoint.md) for the verified hosted deployment.
 
 ## Preserved implementation
 

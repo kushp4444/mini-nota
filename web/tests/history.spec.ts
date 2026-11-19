@@ -94,7 +94,7 @@ async function fixture(page: Page, status = "completed") {
   });
 }
 for (const outcome of ["completed", "failed", "canceled"]) {
-test(`${outcome} results and PNG bytes survive reload and a new run without server access`, async ({
+test(`${outcome} results and PNG bytes survive reload and a new run without server access`, { tag: outcome === "completed" ? "@smoke" : [] }, async ({
   page,
 }) => {
   await fixture(page, outcome);
@@ -389,7 +389,7 @@ test("feature and survival stage values and data artifacts remain inspectable af
   await expect(results.getByText("Not run — no result saved")).toHaveCount(2);
 });
 
-test("Analysis keeps the saved run cohort when the next selection changes", async ({ page }) => {
+test("Analysis keeps the saved run cohort when the next selection changes", { tag: "@smoke" }, async ({ page }) => {
   await fixture(page);
   await page.goto("/");
   await page.getByRole("button", { name: "Run analysis" }).click();
@@ -403,7 +403,7 @@ test("Analysis keeps the saved run cohort when the next selection changes", asyn
   await expect(page.getByRole("img", { name: /LUNG1-001 tumor mask overlay/ })).toBeVisible();
 });
 
-test("missing authorized artifact bytes can be recovered without replaying the run", async ({ page }) => {
+test("missing authorized artifact bytes can be recovered without replaying the run", { tag: "@smoke" }, async ({ page }) => {
   await fixture(page);
   const overlayUrl = "/api/runs/fixture-1/artifacts/1/0";
   const tableUrl = "/api/runs/fixture-1/artifacts/1/1";

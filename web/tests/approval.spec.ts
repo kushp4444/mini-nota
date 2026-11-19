@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';
 // Synthetic API fixture verifies browser gate persistence; real tools are covered by API tests.
-for (const scenario of ['idle','cross-tab-approval','cross-tab-cancellation','restore','restore-again','restore-conflict','invalid-checkpoint','lost-local-data'] as const) test(`saved approval recovery: ${scenario}`,async({context,page})=>{
+for (const scenario of ['idle','cross-tab-approval','cross-tab-cancellation','restore','restore-again','restore-conflict','invalid-checkpoint','lost-local-data'] as const) test(`saved approval recovery: ${scenario}`, { tag: scenario === 'idle' || scenario === 'restore' ? '@smoke' : [] }, async({context,page})=>{
  let approved=false, canceled=false, approvals=0, lost=false, restores=0, recoveredPages=0, eventPages=0;
  const report={scoring_eligible_count:1,evaluation_eligible_count:0,dispositions:[{patient_id:'FIXTURE-FLAGGED',scoring_eligible:false,evaluation_eligible:false,reasons:[{message:'Privacy scan check failed'}]},{patient_id:'FIXTURE-MISSING',scoring_eligible:true,evaluation_eligible:false,reasons:[{message:'No recorded outcome; risk scoring remains available'}]}]};
  const checkpoint={version:1,run_id:'gate-fixture',patient_ids:['FIXTURE-FLAGGED','FIXTURE-MISSING'],model_version:'fixture-model',feature_version:'fixture-features',feature_rows:[{patient_id:'FIXTURE-MISSING',values:{measurement:1},feature_schema:['measurement'],feature_version:'fixture-features'}],eligibility:report,disclosure_id:'cohort-content-hash',last_sequence:1};

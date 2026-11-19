@@ -1,10 +1,10 @@
-The current deployment path is [the Render/Modal runbook](modal-render-runbook.md); it supersedes the historical candidate below.
+Use the [Render/Modal runbook](modal-render-runbook.md) for deployment and the [release checkpoint](../docs/release-checkpoint.md) for the verified release.
 
 # Pre-migration release candidate (superseded hosting plan)
 
 The owner subsequently chose a lightweight Render dispatcher, Neon metadata/features/results, R2 scans/saved results and Modal heavy execution, with Vercel frontend. That approved durable persistence supersedes the browser-only and single-host deployment guidance below. This document preserves the tested local baseline and candidate Linux tooling for adaptation; **do not provision from it as the new plan**. Architecture/spec updates are owned by the integration coordinator.
 
-Status: local Darwin/arm64 verification is documented in `docs/ticket-15-handoff.md`. Public hosting and Linux extraction parity are release gates, not completed claims. Vercel is the chosen frontend; backend, asset storage and managed Postgres providers/credentials/resource budget still require the owner.
+The [local handoff](../docs/ticket-15-handoff.md) records the Darwin/arm64 baseline for this historical setup.
 
 ## Immutable data and database
 
@@ -69,5 +69,3 @@ Live computation spans many short requests: bounded `/event-page` polling (20 ev
 Run `python -m pytest tests -q` with local fixture Postgres, stable test signing key, bounded native threads. Run `npm ci`, `npm run build -- --webpack`, `npx tsc --noEmit`, then the **entire** `npx playwright test` harness from `web` against a configured production frontend + actual 82-patient catalog/runner/engine. `workflow.spec.ts`, scoring and evaluation are real-data checks; the other labeled fixture tests exercise browser failure/recovery. Never seed test patients over the frozen catalog; API fixtures create private schemas.
 
 On the hosted target verify the full 82-patient run, single patient, clean/flagged/malformed/missing-outcome cases, confirmation/cancel, tool failure, runner+engine loss, cross-visitor independence, 20-year clock approval restoration, browser artifact durability with backend unavailable, terminal History, quota/unavailable storage, and no server visitor files after success/cancel/failure/replacement. Inspect representative overlays and observed KM steps. Retain only aggregate numerical/resource receipts and screenshots without visitor capabilities. Do not publish run-secret/checkpoint receipts or browser profiles.
-
-Public deployment remains blocked until credentials/connections, providers, accepted resources/cost and actual Linux/image/provider verification exist. No public URL is provided by this local setup.

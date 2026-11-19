@@ -40,7 +40,7 @@ async function fixture(context: BrowserContext, loseResponse = false) {
   return { launches: () => launches, cancellations: () => cancellations };
 }
 
-test('confirmation dismisses safely; cancellation retains results and enables a fresh run across tabs', async ({context,page,browser}) => {
+test('confirmation dismisses safely; cancellation retains results and enables a fresh run across tabs', { tag: '@smoke' }, async ({context,page,browser}) => {
   const api = await fixture(context);
   await page.goto('/');
   await page.getByRole('button',{name:'Run analysis'}).click();

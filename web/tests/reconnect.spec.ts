@@ -57,7 +57,7 @@ test('repeated reloads keep a contiguous audit timeline without duplicate delive
  expect(server.cursors.filter(c=>c===1).length).toBeGreaterThanOrEqual(2);
 });
 
-test('a replay gap is disclosed without accepting terminal completion or losing earlier evidence',async ({context,page})=>{
+test('a replay gap is disclosed without accepting terminal completion or losing earlier evidence', { tag: '@smoke' }, async ({context,page})=>{
  const server=await setup(context); await page.goto('/'); await page.getByRole('button',{name:'Run analysis'}).click();
  await expect(page.locator('.timeline .event')).toHaveCount(1);
  await context.route('**/api/runs/recover/event-page?*',r=>r.fulfill({json:{id:'recover',status:'completed',events:[{id:'recover:3',run_id:'recover',sequence:3,kind:'done',timestamp:'2026-11-11T12:00:00Z',message:'Untrustworthy completion',payload:{status:'completed'}}],next_sequence:3,last_sequence:3}}));

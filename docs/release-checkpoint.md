@@ -1,0 +1,11 @@
+# Release checkpoint
+
+The November 18 recruiter release was verified at `19a6fe6d925796d02f6570b473264eeafce423a9`. [Open the recruiter demo](https://web-one-lake-30.vercel.app/) or see the [handoff verification](https://github.com/kushp4444/mini-nota/issues/26#issuecomment-6995725292).
+
+- **Hosted run.** All 82 held-out patients completed QC, masking, feature extraction and frozen-model scoring through Vercel, Render, Neon, R2 and Modal. Every patient's newly extracted Linux features and scores matched the frozen reference within the declared tolerances. The completed example contains the verified results and audit trail. Timing, sampled memory, artifacts and observed Modal usage are in the [hosted receipt](release-hosted-verification-v1.json) and [run verification](https://github.com/kushp4444/mini-nota/issues/25#issuecomment-6995620820).
+- **Run controls.** A real single-patient run reopened in History. Separate hosted checks covered approval, cancellation, dispatcher restart, worker interruption and per-run access. [Single-patient check](https://github.com/kushp4444/mini-nota/issues/22#issuecomment-6938302228) · [Recovery checks](https://github.com/kushp4444/mini-nota/issues/23#issuecomment-6938674119).
+- **Release checks.** The production build, TypeScript, Python, Playwright and both Linux deployment image builds passed at the release commit. [Suite results](https://github.com/kushp4444/mini-nota/issues/24#issuecomment-6995724918) · [Linux CI](https://github.com/kushp4444/mini-nota/actions/runs/44427697569).
+
+For a quick demo, open the saved completed example. Launching the full cohort repeats live computation and took about 61 minutes including scan staging. Render Free needed a retry on one cold launch. See the [handoff](https://github.com/kushp4444/mini-nota/issues/26#issuecomment-6995725292) for the observed limits.
+
+[Release tracker #15](https://github.com/kushp4444/mini-nota/issues/15) remains open. The [public run limits](https://github.com/kushp4444/mini-nota/issues/27) are a separate follow-up. For redeployment, use the [Render/Modal runbook](../deploy/modal-render-runbook.md). Update this checkpoint with the verified commit and evidence after the next hosted release.

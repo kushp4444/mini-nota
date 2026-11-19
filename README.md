@@ -1,6 +1,6 @@
 # Mini-Nota
 
-**Deployment:** the [Render/Modal runbook](deploy/modal-render-runbook.md) covers Vercel, Render, Neon, Cloudflare R2 and Modal Functions. The remote worker and dispatcher have been exercised locally with PostgreSQL and S3-compatible storage. Hosted verification still requires provider accounts. The measurements below describe the local demo.
+The verified hosted release and recruiter demo are recorded in the [release checkpoint](docs/release-checkpoint.md).
 
 Mini-Nota is an unauthenticated public-data imaging workflow demonstration: select held-out Lung1 patients, inspect scan checks, tumor masks, 72 radiomic measurements and frozen-model risk rankings, and review the actual tool calls and decisions. Patients, Analysis, browser-local History and immediately viewable curated examples share a NOTA-inspired workspace. This independent project is not affiliated with Altis Labs, a medical device or medical advice.
 
@@ -17,32 +17,29 @@ Use CPython **3.14.7** and the recorded measurement versions. Install requiremen
 ```bash
 python -m venv .venv
 .venv/bin/python -m pip install -r deploy/requirements-runtime.txt
-cd web
-npm ci
+npm --prefix web ci
 ```
 
 Obtain and prepare the public dataset using [data/README.md](data/README.md), [preparation handoff](docs/ticket-6-handoff.md), [model handoff](docs/ticket-7-handoff.md) and [evaluation handoff](docs/ticket-8-handoff.md). Large source/prepared images and model bundles are ignored by Git. Keep the existing frozen partition/model unchanged when reproducing this release. Import catalog, model and evaluation explicitly with operator database credentials, then serve using a separate read-only identity as described in [deploy/README.md](deploy/README.md).
 
-Configure backend environment using [deploy/backend.env.example](deploy/backend.env.example): `DATABASE_URL`, `RAW_DIR`, `MODEL_BUNDLE`, `OUTCOMES_CSV`, private `ENGINE_SECRET` and a stable random `CHECKPOINT_SIGNING_KEY` of at least 32 characters. Keep keys outside Git. From the repository root:
+With the prepared assets and seeded local PostgreSQL catalog in place, start the frontend, runner and private engine from the repository root.
 
 ```bash
-.venv/bin/python -m service.backend
+.venv/bin/python -m scripts.dev
 ```
 
-Configure `web/.env.local` from [web/.env.example](web/.env.example), using the read-only database and `RUNNER_URL=http://127.0.0.1:8000`. From `web`, run `npm run dev`; production verification uses `npm run build -- --webpack` then `npm run start`. No secrets need a `NEXT_PUBLIC_` prefix. Static curated examples remain viewable even without a live backend and explicitly identify introduced fixture faults.
+The launcher prints the preview URL and service log paths. Press Ctrl+C to stop the stack. Use `--check` to verify prerequisites or `--web-port 3010` to choose a predictable preview URL. The default catalog uses PostgreSQL on `127.0.0.1:55432`. Export a loopback `CATALOG_DATABASE_URL` or `DATABASE_URL` to use a different local catalog. Use `--help` for asset overrides and signing key options.
 
 ## Verification and deployment
 
+CI builds the production frontend and runs seven Playwright checks using browser fixtures. To run the same checks from `web/`, install Chromium with `npx playwright install --only-shell chromium`, then run:
+
 ```bash
-# Repository root; fixture Postgres configured via DATABASE_URL.
-OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 .venv/bin/python -m pytest tests -q
-# web/; production frontend and actual held-out backend running.
 npm run build -- --webpack
-npx tsc --noEmit
-WEB_URL=http://localhost:3000 npx playwright test
+npm run test:e2e:smoke
 ```
 
-API tests isolate their PostgreSQL schemas. Browser tests label synthetic fixtures; workflow/scoring/evaluation checks require the real 82-patient catalog and immutable imaging/model assets. No synthetic result is a full-library performance measurement.
+For the full browser suite, start the local stack and run `npm run test:e2e` from `web/` with the `WEB_URL` printed by the launcher. The workflow, scoring and evaluation tests use the real held-out catalog and frozen assets. Run Python checks from the repository root with `OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 .venv/bin/python -m pytest tests -q`. API tests use isolated PostgreSQL schemas on the fixture database configured through `DATABASE_URL`.
 
 Run the mandatory S3 HTTP fixture suite in a separate environment so Moto's test dependencies do not change the app runtime:
 
@@ -54,6 +51,6 @@ REQUIRE_STORAGE_FIXTURE=1 /tmp/mini-nota-storage-fixture/bin/python -m pytest te
 
 These are local S3 fixture checks, not actual R2 verification. See [storage handoff](docs/ticket-17-handoff.md) for manifest bootstrap, role-specific credentials and integration requirements.
 
-See the [hosted deployment runbook](deploy/modal-render-runbook.md) for provider configuration and qualification. The [local release evidence](docs/ticket-15-handoff.md) records the full 82-patient run; the [worker handoff](docs/ticket-18-handoff.md) records the separate real-patient run through the new storage and worker path. Hosted verification includes comparing freshly extracted Linux features and scores with the frozen model contract.
+Use the [hosted deployment runbook](deploy/modal-render-runbook.md) for provider configuration and redeployment checks. The [local release receipt](docs/release-local-verification-v1.json) records the pre-migration 82-patient run.
 
 The original offline CLI (`python -m src.pipeline`) remains available for development; its legacy survival fitting is separate from the hosted frozen-model workflow. Numerical geometry, measurement and survival behavior are documented in `docs/ticket-4-handoff.md` through `docs/ticket-8-handoff.md`.
