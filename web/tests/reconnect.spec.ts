@@ -24,10 +24,10 @@ async function setup(context: BrowserContext) {
 }
 test('closing a tab then returning after completion resumes cursor and retains actual bytes',async ({context,page})=>{
  const server=await setup(context);
- await page.goto('/'); await page.getByRole('button',{name:'Run analysis'}).click();
+ await page.goto('/workspace'); await page.getByRole('button',{name:'Run analysis'}).click();
  await expect(page.locator('.timeline')).toContainText('Synthetic plan');
  await page.close(); server.finish();
- const returned=await context.newPage(); await returned.goto('/');
+ const returned=await context.newPage(); await returned.goto('/workspace');
  await expect(returned.getByText('Saved in this browser',{exact:true})).toBeVisible();
  expect(server.cursors).toContain(1);
  await returned.reload(); await returned.getByRole('button',{name:'History',exact:true}).click();
@@ -37,7 +37,7 @@ test('closing a tab then returning after completion resumes cursor and retains a
  await expect(returned.getByRole('img',{name:/overlay/})).toHaveJSProperty('naturalWidth',1);
 });
 for (const outcome of ['lose','stale'] as const) test(`${outcome} runner access produces explained local failure and permits a new run`,async ({context,page})=>{
- const server=await setup(context); await page.goto('/'); await page.getByRole('button',{name:'Run analysis'}).click();
+ const server=await setup(context); await page.goto('/workspace'); await page.getByRole('button',{name:'Run analysis'}).click();
  await expect(page.locator('.timeline')).toContainText('Synthetic plan');
  server[outcome](); await page.reload();
  await expect(page.getByText(/Start a new run for interrupted computation/)).toBeVisible();
@@ -48,7 +48,7 @@ for (const outcome of ['lose','stale'] as const) test(`${outcome} runner access 
 });
 
 test('repeated reloads keep a contiguous audit timeline without duplicate delivery',async ({context,page})=>{
- const server=await setup(context); await page.goto('/'); await page.getByRole('button',{name:'Run analysis'}).click();
+ const server=await setup(context); await page.goto('/workspace'); await page.getByRole('button',{name:'Run analysis'}).click();
  await expect(page.locator('.timeline .event')).toHaveCount(1);
  for (let i=0;i<2;i++) {await page.reload(); await expect(page.locator('.timeline .event')).toHaveCount(1);}
  server.finish();
@@ -58,7 +58,7 @@ test('repeated reloads keep a contiguous audit timeline without duplicate delive
 });
 
 test('a replay gap is disclosed without accepting terminal completion or losing earlier evidence', { tag: '@smoke' }, async ({context,page})=>{
- const server=await setup(context); await page.goto('/'); await page.getByRole('button',{name:'Run analysis'}).click();
+ const server=await setup(context); await page.goto('/workspace'); await page.getByRole('button',{name:'Run analysis'}).click();
  await expect(page.locator('.timeline .event')).toHaveCount(1);
  await context.route('**/api/runs/recover/event-page?*',r=>r.fulfill({json:{id:'recover',status:'completed',events:[{id:'recover:3',run_id:'recover',sequence:3,kind:'done',timestamp:'2026-11-11T12:00:00Z',message:'Untrustworthy completion',payload:{status:'completed'}}],next_sequence:3,last_sequence:3}}));
  await page.reload();
@@ -70,7 +70,7 @@ test('a replay gap is disclosed without accepting terminal completion or losing 
 
 
 test('worker loss preserves collected overlay bytes and names outputs that never arrived',async ({context,page})=>{
- const server=await setup(context); await page.goto('/'); await page.getByRole('button',{name:'Run analysis'}).click();
+ const server=await setup(context); await page.goto('/workspace'); await page.getByRole('button',{name:'Run analysis'}).click();
  await expect(page.locator('.timeline')).toContainText('Synthetic plan');
  server.mask();
   await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
@@ -86,7 +86,7 @@ test('worker loss preserves collected overlay bytes and names outputs that never
 });
 
 test('a slower second tab cannot overwrite the saved terminal timeline with an older prefix',async ({context,page})=>{
- const server=await setup(context); await page.goto('/'); await page.getByRole('button',{name:'Run analysis'}).click();
+ const server=await setup(context); await page.goto('/workspace'); await page.getByRole('button',{name:'Run analysis'}).click();
  await expect(page.locator('.timeline .event')).toHaveCount(1);
  const slow=await context.newPage(); let release!:()=>void;
  const held=new Promise<void>(resolve=>{release=resolve});
@@ -95,7 +95,7 @@ test('a slower second tab cannot overwrite the saved terminal timeline with an o
    const after=Number(new URL(r.request().url()).searchParams.get('after'));
    return r.fulfill({json:{id:'recover',status:'running',events:after===1?[{id:'recover:2',run_id:'recover',sequence:2,kind:'tool_result',timestamp:'2026-11-11T12:00:00Z',message:'Delayed synthetic result',payload:{stage:'features'}}]:[],next_sequence:2,last_sequence:2}});
  });
- await slow.goto('/'); await expect(slow.locator('.timeline .event')).toHaveCount(1);
+ await slow.goto('/workspace'); await expect(slow.locator('.timeline .event')).toHaveCount(1);
  // Terminal state is saved by the faster subscriber before the slower tab resumes.
  server.finish(); await expect(page.getByText('Saved in this browser',{exact:true})).toBeVisible();
  release(); await expect(slow.locator(".timeline .event")).toHaveCount(2); await slow.close();
@@ -119,7 +119,7 @@ test('a late catalog response preserves the recovered launch selection', async (
    await heldCreate;
    await route.fulfill({status:201,json:{id:'recover',secret:'opaque-secret',status:'running'}});
  });
- await page.goto('/');
+ await page.goto('/workspace');
  await expect(page.getByText('1 patients',{exact:true})).toBeVisible();
  release();
  await expect(page.getByText('2',{exact:true})).toBeVisible();
@@ -140,7 +140,7 @@ test('Run waits for saved-history recovery before accepting a new launch',async 
      return request;
    };
  });
- await page.goto('/');
+ await page.goto('/workspace');
  await expect(page.getByText('1 patients',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Run analysis'})).toBeDisabled();
  await page.evaluate(()=>(window as typeof window & {releaseHistory?:()=>void}).releaseHistory?.());

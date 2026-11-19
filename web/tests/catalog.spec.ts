@@ -8,7 +8,7 @@ test("real held-out catalog labels and default selection follow the server", asy
       { id: "LUNG1-102", label: "Public Lung1 · frozen held-out patient", fixture: false },
     ] } } });
   });
-  await page.goto("/");
+  await page.goto("/workspace");
   await expect(page.getByText("2 frozen held-out patients · excluded from model development", { exact: true })).toBeVisible();
   await expect(page.getByText("DEVELOPMENT FIXTURE", { exact: true })).toHaveCount(0);
   const boxes = page.locator("tbody input[type=checkbox]");

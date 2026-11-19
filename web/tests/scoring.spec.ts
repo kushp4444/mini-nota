@@ -11,7 +11,7 @@ test("real held-out patient receives frozen model score and retains it in Histor
   expect(data.modelMetadata.development_count).toBe(332);
   expect(data.modelMetadata.reference_count).toBe(332);
   const id = data.patients[0].id;
-  await page.goto('/');
+  await page.goto('/workspace');
   await expect(page.getByText('82 frozen held-out patients')).toBeVisible();
   await page.getByLabel('Select all patients').uncheck();
   await page.getByLabel(`Select ${id}`, {exact:true}).check();

@@ -1,4 +1,4 @@
-import "./style.css";
+import "../style.css";
 export const metadata = {
   title: "Mini-Nota · Imaging Analysis",
   description: "Public Lung1 imaging workflow demonstration",

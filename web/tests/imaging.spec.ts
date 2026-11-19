@@ -68,7 +68,7 @@ test("scan flags and feature failures remain visible when an interrupted run is 
     await expect(failure.getByText("Could not calculate texture measurements")).toBeVisible();
   }
 
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("button", { name: "Run analysis" }).click();
   await expect(page.getByText("Saved in this browser", { exact: true })).toBeVisible();
   await expectFindings(page.locator("body"));

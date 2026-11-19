@@ -1,18 +1,18 @@
 "use client";
-import { loadExample, type Example } from "../lib/examples";
-import ApprovalGate from "../components/ApprovalGate";
-import ScoreResults, { HeldOutBenchmark } from "../components/ScoreResults";
-import QCResults from "../components/QCResults";
-import MaskResults from "../components/MaskResults";
-import FeatureResults from "../components/FeatureResults";
-import usePatientResults from "../components/usePatientResults";
-import MissingArtifact, { type ArtifactRecovery } from "../components/MissingArtifact";
+import { loadExample, type Example } from "../../lib/examples";
+import ApprovalGate from "../../components/ApprovalGate";
+import ScoreResults, { HeldOutBenchmark } from "../../components/ScoreResults";
+import QCResults from "../../components/QCResults";
+import MaskResults from "../../components/MaskResults";
+import FeatureResults from "../../components/FeatureResults";
+import usePatientResults from "../../components/usePatientResults";
+import MissingArtifact, { type ArtifactRecovery } from "../../components/MissingArtifact";
 import { useEffect, useRef, useState } from "react";
-import History from "../components/History";
-import { recoverLaunch, StoppedLaunch } from "../lib/launch";
-import { reconnectRun } from "../lib/reconnect";
-import CancelRun from "../components/CancelRun";
-import { browserRun, watchBrowserRun, reserveBrowserRun, attachBrowserRun, releaseBrowserRun, pendingLaunch, reclaimBrowserRun, type PendingLaunch } from "../lib/browser-run";
+import History from "../../components/History";
+import { recoverLaunch, StoppedLaunch } from "../../lib/launch";
+import { reconnectRun } from "../../lib/reconnect";
+import CancelRun from "../../components/CancelRun";
+import { browserRun, watchBrowserRun, reserveBrowserRun, attachBrowserRun, releaseBrowserRun, pendingLaunch, reclaimBrowserRun, type PendingLaunch } from "../../lib/browser-run";
 import {
   SavedRun,
   createSavedRun,
@@ -22,9 +22,9 @@ import {
   saveRun,
   storageMessage,
   terminal,
-} from "../lib/history";
+} from "../../lib/history";
 type Patient = { id: string; label: string; fixture: boolean };
-export default function Home() {
+export default function Workspace() {
   const [view, setView] = useState("Patients"),
     [catalog, setCatalog] = useState<Patient[]>([]),
     [selection, setSelection] = useState<string[]>([]),
@@ -261,14 +261,15 @@ export default function Home() {
   return (
     <div className={view === "Examples" && example ? "shell example-layout" : "shell"}>
       {view === "Examples" && example && <header className="example-masthead">
-        <button className="example-wordmark" onClick={() => setView("Patients")}>Mini-Nota</button>
+        <a className="example-wordmark home-link" href="/">Mini-Nota</a>
         <nav aria-label="Example sections"><a href="#results">Results</a><a href="#scans">Scans</a><a href="#measurements">Measurements</a><a href="#record">Run record</a></nav>
         <button className="example-return" onClick={() => { setExample(undefined); }}>Examples</button>
       </header>}
-      <aside className="nav" aria-label="Workspace">
+      <aside className="nav" aria-label="Analysis navigation">
         <div className="brand">
           <div>
-            Mini-Nota<small>Imaging workspace</small>
+            <a className="home-link" href="/">Mini-Nota</a>
+            <small>Cohort imaging</small>
           </div>
         </div>
         <div className="workspace">

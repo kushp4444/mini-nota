@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test('curated execution is immediately inspectable without launching a visitor run', async ({page}) => {
   let launches = 0;
   await page.route('**/api/runs**', async route => { launches++; await route.abort(); });
-  await page.goto('/');
+  await page.goto('/workspace');
   await page.getByRole('button', {name:'View completed example', exact:true}).click();
   await expect(page.getByText('Completed example', {exact:true})).toBeVisible({timeout:30000});
   await expect(page.getByText('82 patients. One completed run.', {exact:true})).toBeVisible();
@@ -65,7 +65,7 @@ test('curated execution is immediately inspectable without launching a visitor r
 test('failure fixture discloses named exclusions and recorded approval without visitor capabilities', async ({page}) => {
   const controls: string[] = [];
   await page.route('**/api/runs**', async route => { controls.push(route.request().url()); await route.abort(); });
-  await page.goto('/');
+  await page.goto('/workspace');
   await page.getByRole('button',{name:'View failure example',exact:true}).click();
   await expect(page.getByText('Deliberately introduced fixture faults; the live library is unchanged.',{exact:true})).toBeVisible();
   const checks = page.getByRole('region', {name:'Scan quality'});

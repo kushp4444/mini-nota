@@ -25,7 +25,7 @@ for (const scenario of ['idle','cross-tab-approval','cross-tab-cancellation','re
  });
  await context.route('**/api/runs/gate-fixture/approve',r=>{expect(r.request().headers().authorization).toBe('Bearer fixture-secret');expect(r.request().postDataJSON()).toEqual({disclosure_id:'cohort-content-hash',model_version:'fixture-model'});approvals++;approved=true;return r.fulfill({json:{id:'gate-fixture',status:'running'}})});
  await context.route('**/api/runs/restore',r=>{expect(r.request().headers().authorization).toBe('Bearer fixture-secret');expect(r.request().postDataJSON()).toEqual({checkpoint});restores++;if(scenario==='invalid-checkpoint')return r.fulfill({status:422,json:{detail:'Saved approval is incompatible; keep History and start a new run.'}});lost=false;if(scenario==='restore-conflict')return r.fulfill({status:409,json:{detail:'A newer disclosure exists; reconnect and review the current gate'}});return r.fulfill({json:{id:'gate-fixture',status:'waiting_approval'}})});
- await page.goto('/');await page.getByRole('button',{name:'Run analysis'}).click();
+ await page.goto('/workspace');await page.getByRole('button',{name:'Run analysis'}).click();
  const gate=page.getByLabel('Patient exclusion approval');
  await expect(gate).toContainText('1 scoring-eligible patients · 0 evaluation-eligible patients');
  await expect(page.getByText('Approval gate saved in this browser',{exact:true})).toBeVisible();
@@ -41,7 +41,7 @@ for (const scenario of ['idle','cross-tab-approval','cross-tab-cancellation','re
  }
  if(scenario==='cross-tab-approval' || scenario==='cross-tab-cancellation') {
    const other=await context.newPage();
-   await other.goto('/');
+   await other.goto('/workspace');
    const refresh='Refresh run status';
    await expect(page.getByRole('button',{name:refresh})).toBeVisible();
    await expect(other.getByRole('button',{name:refresh})).toBeVisible();
@@ -61,7 +61,7 @@ for (const scenario of ['idle','cross-tab-approval','cross-tab-cancellation','re
    // Delete origin storage with no app subscriber alive to write another prefix.
    await returned.goto('/missing-local-data-test');
    await returned.evaluate(async()=>{localStorage.clear();await new Promise<void>((resolve,reject)=>{const r=indexedDB.deleteDatabase('mini-nota-history');r.onsuccess=()=>resolve();r.onerror=()=>reject(r.error);});});
-   await returned.goto('/');await expect(returned.getByRole('button',{name:'Run analysis'})).toBeEnabled();
+   await returned.goto('/workspace');await expect(returned.getByRole('button',{name:'Run analysis'})).toBeEnabled();
    await expect(returned.getByLabel('Patient exclusion approval')).toHaveCount(0);
    expect(restores).toBe(0);expect(approvals).toBe(0);return;
  }

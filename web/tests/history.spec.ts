@@ -98,7 +98,7 @@ test(`${outcome} results and PNG bytes survive reload and a new run without serv
   page,
 }) => {
   await fixture(page, outcome);
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("button", { name: "Run analysis" }).click();
   await expect(
     page.getByText("Saved in this browser", { exact: true }),
@@ -144,7 +144,7 @@ test("failed runs retain available results and name unfinished stages", async ({
   page,
 }) => {
   await fixture(page, "failed");
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("button", { name: "Run analysis" }).click();
   await expect(
     page.getByText("Saved in this browser", { exact: true }),
@@ -177,7 +177,7 @@ test("unavailable browser storage is explained without claiming a save", async (
     Object.defineProperty(window, "indexedDB", { get: () => undefined }),
   );
   await fixture(page);
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("button", { name: "Run analysis" }).click();
   await expect(page.getByRole("alert").filter({ hasText: /Browser history|Browser storage|Missing artifact/ })).toContainText(
     "Browser history is unavailable",
@@ -198,7 +198,7 @@ test("quota failures are visible and never reported as saved", async ({
     };
   });
   await fixture(page);
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("button", { name: "Run analysis" }).click();
   await expect(page.getByRole("alert").filter({ hasText: /Browser history|Browser storage|Missing artifact/ })).toContainText(
     "Browser storage is full",
@@ -214,7 +214,7 @@ test("canceled terminal records are readable without inventing later results", a
   page,
 }) => {
   await fixture(page, "canceled");
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("button", { name: "Run analysis" }).click();
   await expect(
     page.getByText("Saved in this browser", { exact: true }),
@@ -275,7 +275,7 @@ test("temporary artifact bytes remain local after the application artifact disap
       body: '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"><rect width="12" height="12" fill="blue"/></svg>',
     }),
   );
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("button", { name: "Run analysis" }).click();
   await expect(
     page.getByText("Saved in this browser", { exact: true }),
@@ -338,7 +338,7 @@ test("missing artifacts retain actual numerical results and a named warning", as
         .join(""),
     }),
   );
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("button", { name: "Run analysis" }).click();
   await expect(
     page.getByText("Saved in this browser", { exact: true }),
@@ -368,7 +368,7 @@ test("feature and survival stage values and data artifacts remain inspectable af
       { kind: "done", message: "Synthetic complete", payload: {status: "completed"} }
     ].map((event, i) => `data: ${JSON.stringify({...event, id: `fixture-1:${i + 1}`, run_id: "fixture-1", sequence: i + 1, timestamp: "2026-11-11T12:00:00Z"})}\n\n`).join("")
   }));
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("button", {name: "Run analysis"}).click();
   await expect(page.getByText("Saved in this browser", {exact: true})).toBeVisible();
   await page.route("**/api/runs/**", route => route.abort());
@@ -391,7 +391,7 @@ test("feature and survival stage values and data artifacts remain inspectable af
 
 test("Analysis keeps the saved run cohort when the next selection changes", { tag: "@smoke" }, async ({ page }) => {
   await fixture(page);
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("button", { name: "Run analysis" }).click();
   await expect(page.getByText("Saved in this browser", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Patients", exact: true }).click();
@@ -432,7 +432,7 @@ test("missing authorized artifact bytes can be recovered without replaying the r
       {kind: "done", message: "Synthetic complete", payload: {status: "completed"}},
     ].map((event, i) => `data: ${JSON.stringify({...event, id: `fixture-1:${i + 1}`, run_id: "fixture-1", sequence: i + 1, timestamp: "2026-11-11T12:00:00Z"})}\n\n`).join("")});
   });
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("button", {name: "Run analysis"}).click();
   await expect(page.getByText("Saved in this browser", {exact: true})).toBeVisible();
   await expect(page.getByText("Missing artifact: overlay.", {exact: false})).toBeVisible();
@@ -473,7 +473,7 @@ test("History shows interrupted scoring and the status of each disclosed gate", 
       {kind: "done", message: "Synthetic failure", payload: {status: "failed"}},
     ].map((event, i) => `data: ${JSON.stringify({...event, id: `fixture-1:${i + 1}`, run_id: "fixture-1", sequence: i + 1, timestamp: "2026-11-11T12:00:00Z"})}\n\n`).join(""),
   }));
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("button", {name: "Run analysis"}).click();
   await expect(page.getByText("Saved in this browser", {exact: true})).toBeVisible();
   await page.getByRole("button", {name: "History", exact: true}).click();
@@ -501,7 +501,7 @@ test("the same ranking finding and score details are available after reopening a
     ].map((event, i) => `data: ${JSON.stringify({...event, id: `fixture-1:${i + 1}`, run_id: "fixture-1", sequence: i + 1, timestamp: "2026-11-11T12:00:00Z"})}\n\n`).join(""),
   }));
   const finding = /Reference percentile 78/;
-  await page.goto("/");
+  await page.goto("/workspace");
   await page.getByRole("button", {name: "Run analysis"}).click();
   await expect(page.getByText("Saved in this browser", {exact: true})).toBeVisible();
   await expect(page.getByText(finding)).toBeVisible();

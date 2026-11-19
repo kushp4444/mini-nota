@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 test('full held-out library keeps Run visible and the benchmark near the cohort',async({page})=>{
   await page.setViewportSize({width:1600,height:1000});
-  await page.goto('/');
+  await page.goto('/workspace');
   await expect(page.getByText('82 frozen held-out patients')).toBeVisible();
   await expect(page.getByRole('button',{name:'Run analysis'})).toBeInViewport();
   await page.getByRole('button',{name:'Analysis',exact:true}).click();
@@ -13,7 +13,7 @@ test('full held-out library keeps Run visible and the benchmark near the cohort'
 });
 
 test('saved examples present scan checks and overlays before optional structured audit details',async({page})=>{
-  await page.goto('/');
+  await page.goto('/workspace');
   await page.getByRole('button',{name:'View failure example'}).click();
   const saved=page.getByLabel('Saved run results');
   await expect(saved.getByRole('heading',{name:'Scan quality',exact:true})).toBeVisible();

@@ -853,6 +853,8 @@ button { min-height: 36px; }
 .primary:hover { background: var(--color-accent-2); }
 input { accent-color: var(--color-accent); }
 a { color: var(--color-ink); text-decoration-color: var(--color-accent); text-underline-offset: .2em; }
+.home-link { text-decoration: none; }
+.home-link:hover { text-decoration: underline; text-decoration-color: var(--color-accent); }
 :where(button,a,input,select,summary,[tabindex]):focus-visible { outline: 2px solid var(--color-focus); outline-offset: 4px; }
 .tag,.fixture,.status { border-radius: 2px; font-size: 13px; letter-spacing: 0; background: var(--color-paper-2); color: var(--color-ink-2); }
 .agent { background: transparent; border-top: 2px solid var(--color-rule-2); position: sticky; top: 24px; }
