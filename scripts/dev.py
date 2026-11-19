@@ -153,7 +153,7 @@ def wait_ready(request, label, processes, is_ready):
     raise SetupError(f"Timed out waiting for {label}. See the logs.")
 
 
-def run(database, paths, signing_key, web_port, count):
+def run(database, paths, signing_key, web_port, count, hot_reload):
     web_port, runner_port, engine_port = available_ports(web_port)
     url = f"http://{HOST}:{web_port}"
     runner_url = f"http://{HOST}:{runner_port}"
@@ -173,12 +173,25 @@ def run(database, paths, signing_key, web_port, count):
         **shell, "CATALOG_DATABASE_URL": database, "DATABASE_URL": database,
         "RUNNER_URL": runner_url, "NEXT_TELEMETRY_DISABLED": "1",
     }
+    next_cli = ["node", "node_modules/next/dist/bin/next"]
+    if not hot_reload:
+        build_log = logs / "build.log"
+        print(f"Building local preview. Build log: {build_log}", flush=True)
+        with build_log.open("w") as log:
+            build = subprocess.run(
+                [*next_cli, "build"], cwd=WEB, env=frontend,
+                stdout=log, stderr=subprocess.STDOUT,
+            )
+        if build.returncode:
+            raise SetupError(f"Web build failed. See {build_log}.")
+
     processes = []
     try:
         start([sys.executable, "-m", "service.backend"], ROOT, backend, logs / "backend.log", processes)
         wait_ready(f"{runner_url}/health", "runner", processes, lambda body: body.get("status") == "ok")
         wait_ready(f"{engine_url}/openapi.json", "engine", processes, lambda body: "/qc" in body.get("paths", {}))
-        start(["node", "node_modules/next/dist/bin/next", "dev", "--hostname", HOST, "--port", str(web_port)],
+        mode = "dev" if hot_reload else "start"
+        start([*next_cli, mode, "--hostname", HOST, "--port", str(web_port)],
               WEB, frontend, logs / "web.log", processes)
         catalog_request = Request(
             f"{url}/api/graphql",
@@ -211,6 +224,7 @@ def main():
     )
     parser.add_argument("--check", action="store_true", help="Validate dependencies, assets, and catalog without starting servers.")
     parser.add_argument("--web-port", type=int, default=0, help="Choose the web port (default: a free port).")
+    parser.add_argument("--hot-reload", action="store_true", help="Run Next.js in development mode with Fast Refresh.")
     args = parser.parse_args()
     if not 0 <= args.web_port <= 65535:
         parser.error("--web-port must be between 0 and 65535")
@@ -220,7 +234,7 @@ def main():
         count = preflight(database, paths)
         print(f"Local preflight passed for {count} held-out patients.", flush=True)
         if not args.check:
-            run(database, paths, signing_key, args.web_port, count)
+            run(database, paths, signing_key, args.web_port, count, args.hot_reload)
     except SetupError as exc:
         parser.exit(1, f"mini-nota dev: {exc}\n")
     except OSError:

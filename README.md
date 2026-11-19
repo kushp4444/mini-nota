@@ -28,7 +28,7 @@ With the prepared assets and seeded local PostgreSQL catalog in place, start the
 .venv/bin/python -m scripts.dev
 ```
 
-The launcher prints the preview URL and service log paths. Press Ctrl+C to stop the stack. Use `--check` to verify prerequisites or `--web-port 3010` to choose a predictable preview URL. The default catalog uses PostgreSQL on `127.0.0.1:55432`. Export a loopback `CATALOG_DATABASE_URL` or `DATABASE_URL` to use a different local catalog. Use `--help` for asset overrides and signing key options.
+The launcher builds and serves a local preview. Pass `--hot-reload` when editing the frontend and you want Next.js Fast Refresh. The launcher prints the preview URL and service log paths. Press Ctrl+C to stop the stack. Use `--check` to verify prerequisites or `--web-port 3010` to choose a predictable preview URL. The default catalog uses PostgreSQL on `127.0.0.1:55432`. Export a loopback `CATALOG_DATABASE_URL` or `DATABASE_URL` to use a different local catalog. Use `--help` for asset overrides and signing key options.
 
 ## Verification and deployment
 
