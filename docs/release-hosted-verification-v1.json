@@ -29,5 +29,6 @@
     "relative": 1e-08,
     "absolute": 1e-10
   },
-  "score_absolute_tolerance": 1e-10
+  "score_absolute_tolerance": 1e-10,
+  "elapsed_measurement": "Launch request through terminal event, including scan staging before the first audit event."
 }
