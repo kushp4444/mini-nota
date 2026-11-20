@@ -75,7 +75,8 @@ test("scan flags and feature failures remain visible when an interrupted run is 
 
   await page.route("**/api/runs/**", route => route.abort());
   await page.reload();
-  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page.getByRole("button", { name: "View Runs", exact: true }).click();
+  await page.getByText("Run history", { exact: true }).click();
   await page.getByRole("button", { name: `Open run ${runId}` }).click();
   await expectFindings(page.getByRole("region", { name: "Saved run results" }));
 });

@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./style.css";
 
 export const metadata: Metadata = {
-  title: "Mini-Nota | From CT scans to risk rankings",
-  description: "Follow the Mini-Nota imaging workflow from public Lung1 CT scans to a recorded survival-risk analysis.",
+  title: "Mini-Nota | From CT scans to tumor features",
+  description: "Explore how Mini-Nota builds tumor masks and extracts radiomic features from public Lung1 CT scans.",
 };
 
 export default function LandingLayout({ children }: { children: React.ReactNode }) {

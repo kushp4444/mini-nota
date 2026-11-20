@@ -4,6 +4,8 @@ Faults exist only in a disposable library. This command does not change the cata
 source DICOMs, frozen model or full held-out evaluation. See docs/ticket-14-handoff.md.
 """
 import argparse
+import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -37,6 +39,25 @@ def export(snapshot, label, description, faults):
                           'model_version':snapshot['model']['model_version'],
                           'evaluation_version':snapshot['model']['evaluation']['evaluation_version'],
                           'export':'Terminal read-only product asset; no visitor control capability'}}
+
+
+def write_example(result, output):
+    """Store report data separately from images and downloadable artifacts."""
+    files = output / 'files'
+    files.mkdir(parents=True, exist_ok=True)
+    extensions = {'image/png': 'png', 'application/json': 'json', 'text/csv': 'csv'}
+    for event in result['events']:
+        payload = event['payload']
+        artifacts = payload.get('artifacts', []) + payload.get('patient', {}).get('artifacts', [])
+        for artifact in artifacts:
+            encoded = artifact.pop('data_base64', None)
+            if not encoded:
+                continue
+            data = base64.b64decode(encoded, validate=True)
+            filename = f"{hashlib.sha256(data).hexdigest()}.{extensions[artifact['media_type']]}"
+            (files / filename).write_bytes(data)
+            artifact['file'] = filename
+    (output / f"{result['id']}.json").write_text(json.dumps(result,separators=(',',':'),allow_nan=False)+'\n')
 
 
 def capture(raw, outcomes, bundle, output, label, description, faults, ports, selected):
@@ -74,8 +95,7 @@ def capture(raw, outcomes, bundle, output, label, description, faults, ports, se
             assert snapshot['status'] == 'completed', snapshot
             assert approved == bool(faults)
             result = export(snapshot,label,description,faults)
-            output.mkdir(parents=True,exist_ok=True)
-            (output/f'{label}.json').write_text(json.dumps(result,separators=(',',':'),allow_nan=False)+'\n')
+            write_example(result, output)
             print(f"{label}: {len(result['events'])} actual ordered events; {len(snapshot['stage_results']['score'])} scored",flush=True)
     finally:
         for process in processes: process.terminate()

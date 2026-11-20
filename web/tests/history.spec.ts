@@ -104,10 +104,14 @@ test(`${outcome} results and PNG bytes survive reload and a new run without serv
     page.getByText("Saved in this browser", { exact: true }),
   ).toBeVisible();
   await page.reload();
-  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page.getByRole("button", { name: "View Runs", exact: true }).click();
+  await page.getByText("Run history", { exact: true }).click();
   await page.getByRole("button", { name: /Open run fixture-1/ }).click();
+  await expect(page.getByRole("navigation", { name: "Run sections" }).getByRole("link")).toHaveText(["Scans", "Measurements", "Model evaluation"]);
+  const history = page.locator(".run-history:has(+ .saved-run) > details.run-picker");
+  await expect(history.getByRole("button", { name: "Open run fixture-1", pressed: true })).toBeVisible();
   await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
-  await expect(page.getByText("Tumor volume: 12.5 cm³", { exact: true })).toBeVisible();
+  await expect(page.locator("#scans figcaption").getByText("12.5 cm³", { exact: true })).toBeVisible();
   await expect(page.getByRole("img", { name: /overlay/ })).toBeVisible();
   await expect(page.getByRole("img", { name: /overlay/ })).toHaveJSProperty(
     "naturalWidth",
@@ -119,7 +123,8 @@ test(`${outcome} results and PNG bytes survive reload and a new run without serv
   await expect(
     page.getByText("Saved in this browser", { exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page.getByRole("button", { name: "View Runs", exact: true }).click();
+  await page.getByText("Run history", { exact: true }).click();
   await expect(
     page.getByRole("button", { name: /Open run fixture-/ }),
   ).toHaveCount(2);
@@ -130,7 +135,8 @@ test(`${outcome} results and PNG bytes survive reload and a new run without serv
   });
   await page.route("**/api/runs/**", (r) => r.abort());
   await page.reload();
-  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page.getByRole("button", { name: "View Runs", exact: true }).click();
+  await page.getByText("Run history", { exact: true }).click();
   await page.getByRole("button", { name: /Open run fixture-1/ }).click();
   await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
   await expect(page.getByRole("img", { name: /overlay/ })).toHaveJSProperty(
@@ -138,6 +144,10 @@ test(`${outcome} results and PNG bytes survive reload and a new run without serv
     1,
   );
   expect(replayRequests).toHaveLength(0);
+  await page.getByRole("button", { name: "Completed example", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Completed example", exact: true })).toBeVisible();
+  await expect(page.locator("details.prototype-results")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: /Open run fixture-/ })).toHaveCount(2);
 });
 }
 test("failed runs retain available results and name unfinished stages", async ({
@@ -150,7 +160,8 @@ test("failed runs retain available results and name unfinished stages", async ({
     page.getByText("Saved in this browser", { exact: true }),
   ).toBeVisible();
   await page.reload();
-  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page.getByRole("button", { name: "View Runs", exact: true }).click();
+  await page.getByText("Run history", { exact: true }).click();
   await page.getByRole("button", { name: /Open run fixture-1/ }).click();
   const results = page.getByRole("region", { name: "Saved run results" });
   await expect(
@@ -182,7 +193,8 @@ test("unavailable browser storage is explained without claiming a save", async (
   await expect(page.getByRole("alert").filter({ hasText: /Browser history|Browser storage|Missing artifact/ })).toContainText(
     "Browser history is unavailable",
   );
-  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page.getByRole("button", { name: "View Runs", exact: true }).click();
+  await page.getByText("Run history", { exact: true }).click();
   await expect(page.getByRole("button", { name: /Open run/ })).toHaveCount(0);
   await expect(
     page.getByText("Saved in this browser", { exact: true }),
@@ -207,7 +219,8 @@ test("quota failures are visible and never reported as saved", async ({
   await expect(
     page.getByText("Saved in this browser", { exact: true }),
   ).toHaveCount(0);
-  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page.getByRole("button", { name: "View Runs", exact: true }).click();
+  await page.getByText("Run history", { exact: true }).click();
   await expect(page.getByRole("button", { name: /Open run/ })).toHaveCount(0);
 });
 test("canceled terminal records are readable without inventing later results", async ({
@@ -219,7 +232,8 @@ test("canceled terminal records are readable without inventing later results", a
   await expect(
     page.getByText("Saved in this browser", { exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page.getByRole("button", { name: "View Runs", exact: true }).click();
+  await page.getByText("Run history", { exact: true }).click();
   await page.getByRole("button", { name: /Open run fixture-1/ }).click();
   await expect(
     page.getByRole("heading", { name: "Saved run · canceled" }),
@@ -284,7 +298,8 @@ test("temporary artifact bytes remain local after the application artifact disap
     fulfill(route, { status: 410, body: "Temporary file removed" }),
   );
   await page.reload();
-  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page.getByRole("button", { name: "View Runs", exact: true }).click();
+  await page.getByText("Run history", { exact: true }).click();
   await page.getByRole("button", { name: /Open run fixture-1/ }).click();
   await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
   await expect(page.getByRole("img", { name: /overlay/ })).toHaveJSProperty(
@@ -343,7 +358,8 @@ test("missing artifacts retain actual numerical results and a named warning", as
   await expect(
     page.getByText("Saved in this browser", { exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "History", exact: true }).click();
+  await page.getByRole("button", { name: "View Runs", exact: true }).click();
+  await page.getByText("Run history", { exact: true }).click();
   await page.getByRole("button", { name: /Open run fixture-1/ }).click();
   await expect(page.getByRole("alert").filter({ hasText: /Browser history|Browser storage|Missing artifact/ })).toContainText(
     "Missing artifact: overlay",
@@ -373,7 +389,8 @@ test("feature and survival stage values and data artifacts remain inspectable af
   await expect(page.getByText("Saved in this browser", {exact: true})).toBeVisible();
   await page.route("**/api/runs/**", route => route.abort());
   await page.reload();
-  await page.getByRole("button", {name: "History", exact: true}).click();
+  await page.getByRole("button", {name: "View Runs", exact: true}).click();
+  await page.getByText("Run history", { exact: true }).click();
   await page.getByRole("button", {name: /Open run fixture-1/}).click();
   const results = page.getByRole("region", {name: "Saved run results"});
   await results.getByText("Structured stage details",{exact:true}).click();
@@ -440,7 +457,8 @@ test("missing authorized artifact bytes can be recovered without replaying the r
   await expect(page.getByRole("button", {name: "Retry overlay download"})).toBeEnabled();
   expect(overlayRequests).toBe(2);
   await page.reload();
-  await page.getByRole("button", {name: "History", exact: true}).click();
+  await page.getByRole("button", {name: "View Runs", exact: true}).click();
+  await page.getByText("Run history", { exact: true }).click();
   await page.getByRole("button", {name: "Open run fixture-1"}).click();
   const results = page.getByRole("region", {name: "Saved run results"});
   await results.getByRole("button", {name: "Retry overlay download"}).click();
@@ -449,7 +467,8 @@ test("missing authorized artifact bytes can be recovered without replaying the r
   await expect(results.getByRole("link", {name: "Open saved summary"})).toBeVisible();
   await expect(page.locator(".timeline .event")).toHaveCount(2);
   await page.reload();
-  await page.getByRole("button", {name: "History", exact: true}).click();
+  await page.getByRole("button", {name: "View Runs", exact: true}).click();
+  await page.getByText("Run history", { exact: true }).click();
   await page.getByRole("button", {name: "Open run fixture-1"}).click();
   await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
   await expect(results.getByRole("img", {name: /LUNG1-001 tumor mask overlay/})).toHaveJSProperty("naturalWidth", 1);
@@ -476,7 +495,8 @@ test("History shows interrupted scoring and the status of each disclosed gate", 
   await page.goto("/workspace");
   await page.getByRole("button", {name: "Run analysis"}).click();
   await expect(page.getByText("Saved in this browser", {exact: true})).toBeVisible();
-  await page.getByRole("button", {name: "History", exact: true}).click();
+  await page.getByRole("button", {name: "View Runs", exact: true}).click();
+  await page.getByText("Run history", { exact: true }).click();
   await page.getByRole("button", {name: "Open run fixture-1"}).click();
   const results = page.getByRole("region", {name: "Saved run results"});
   const disclosures = results.getByRole("region", {name: "Recorded exclusion approval"});
@@ -504,10 +524,12 @@ test("the same ranking finding and score details are available after reopening a
   await page.goto("/workspace");
   await page.getByRole("button", {name: "Run analysis"}).click();
   await expect(page.getByText("Saved in this browser", {exact: true})).toBeVisible();
+  await page.locator('#prototype-model > summary').click();
   await expect(page.getByText(finding)).toBeVisible();
   await page.route("**/api/runs/**", route => route.abort());
   await page.reload();
-  await page.getByRole("button", {name: "History", exact: true}).click();
+  await page.getByRole("button", {name: "View Runs", exact: true}).click();
+  await page.getByText("Run history", { exact: true }).click();
   await page.getByRole("button", {name: "Open run fixture-1"}).click();
 
   const scores = page.getByRole("region", {name: "Frozen model risk scores"});

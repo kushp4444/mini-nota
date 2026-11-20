@@ -30,7 +30,8 @@ test('closing a tab then returning after completion resumes cursor and retains a
  const returned=await context.newPage(); await returned.goto('/workspace');
  await expect(returned.getByText('Saved in this browser',{exact:true})).toBeVisible();
  expect(server.cursors).toContain(1);
- await returned.reload(); await returned.getByRole('button',{name:'History',exact:true}).click();
+ await returned.reload(); await returned.getByRole('button',{name:'View Runs',exact:true}).click();
+ await returned.getByText('Run history', { exact: true }).click();
  await returned.getByRole('button',{name:/Open run recover/}).click();
  await expect(returned.locator('.timeline .event')).toHaveCount(3);
  await returned.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
@@ -41,7 +42,8 @@ for (const outcome of ['lose','stale'] as const) test(`${outcome} runner access 
  await expect(page.locator('.timeline')).toContainText('Synthetic plan');
  server[outcome](); await page.reload();
  await expect(page.getByText(/Start a new run for interrupted computation/)).toBeVisible();
- await page.getByRole('button',{name:'History',exact:true}).click();
+ await page.getByRole('button',{name:'View Runs',exact:true}).click();
+ await page.getByText('Run history', { exact: true }).click();
  await page.getByRole('button',{name:/Open run recover/}).click();
  await expect(page.getByRole('heading',{name:'Saved run · failed'})).toBeVisible();
  await expect(page.locator('.timeline')).toContainText('Synthetic plan');
@@ -77,11 +79,12 @@ test('worker loss preserves collected overlay bytes and names outputs that never
  await expect(page.getByRole('img',{name:/tumor mask overlay/})).toHaveJSProperty('naturalWidth',1);
  server.lose(); await page.reload();
  await expect(page.getByText(/Outputs never received here cannot be recovered/)).toBeVisible();
- await page.getByRole('button',{name:'History',exact:true}).click();
+ await page.getByRole('button',{name:'View Runs',exact:true}).click();
+ await page.getByText('Run history', { exact: true }).click();
  await page.getByRole('button',{name:/Open run recover/}).click();
   await page.getByLabel("Tumor masks", {exact:true}).locator("summary").first().click();
  await expect(page.getByRole('img',{name:/overlay/})).toHaveJSProperty('naturalWidth',1);
- await expect(page.getByText('Tumor volume: 12.5 cm³',{exact:true})).toBeVisible();
+ await expect(page.locator('#scans figcaption').getByText('12.5 cm³',{exact:true})).toBeVisible();
  await expect(page.locator('.timeline .event')).toHaveCount(2);
 });
 
@@ -100,7 +103,8 @@ test('a slower second tab cannot overwrite the saved terminal timeline with an o
  server.finish(); await expect(page.getByText('Saved in this browser',{exact:true})).toBeVisible();
  release(); await expect(slow.locator(".timeline .event")).toHaveCount(2); await slow.close();
  await page.route("**/api/runs/**",r=>r.abort());
- await page.reload(); await page.getByRole('button',{name:'History',exact:true}).click();
+ await page.reload(); await page.getByRole('button',{name:'View Runs',exact:true}).click();
+ await page.getByText('Run history', { exact: true }).click();
  await page.getByRole('button',{name:/Open run recover/}).click();
  await expect(page.locator('.timeline .event')).toHaveCount(3);
 });

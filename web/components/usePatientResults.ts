@@ -9,7 +9,7 @@ type Results = Record<(typeof stages)[number], FeaturePatientResult[]>;
 const empty: Results = {qc: [], masks: [], features: []};
 
 /** Hydrate each patient artifact from the same event and index that captured it. */
-export default function usePatientResults(run?: SavedRun): Results {
+export default function usePatientResults(run?: SavedRun, exampleFiles?: Record<string, string>): Results {
   const [retained, setRetained] = useState<{runId: string; results: Results}>();
   useEffect(() => {
     if (!run) return;
@@ -23,8 +23,11 @@ export default function usePatientResults(run?: SavedRun): Results {
         const patient: FeaturePatientResult = structuredClone(event.payload.patient);
         const offset = event.payload.artifacts?.length ?? 0;
         for (const [index, artifact] of (patient.artifacts ?? []).entries()) {
-          const saved = byId.get(`${event.id}:${offset + index}`);
-          if (saved && saved.stage === stage && saved.blob) {
+          const id = `${event.id}:${offset + index}`;
+          const saved = byId.get(id);
+          if (exampleFiles?.[id]) {
+            artifact.imageUrl = exampleFiles[id];
+          } else if (saved && saved.stage === stage && saved.blob) {
             artifact.data_base64 = await new Promise<string | undefined>(resolve => {
               const reader = new FileReader();
               reader.onload = () => resolve(String(reader.result).split(",")[1]);
@@ -38,6 +41,6 @@ export default function usePatientResults(run?: SavedRun): Results {
       if (current) setRetained({runId: run.id, results});
     })();
     return () => { current = false; };
-  }, [run]);
+  }, [run, exampleFiles]);
   return run && retained?.runId === run.id ? retained.results : empty;
 }

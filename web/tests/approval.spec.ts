@@ -71,7 +71,9 @@ for (const scenario of ['idle','cross-tab-approval','cross-tab-cancellation','re
    await expect(page.getByRole('alert').filter({hasText:'Saved approval is incompatible'})).toBeVisible();
    await page.getByRole('button',{name:'Patients',exact:true}).click();
    await expect(page.getByRole('button',{name:'Run analysis'})).toBeEnabled();
-   await page.getByRole('button',{name:'History',exact:true}).click();await page.getByRole('button',{name:'Open run gate-fixture',exact:true}).click();
+   await page.getByRole('button',{name:'View Runs',exact:true}).click();
+   await page.getByText('Run history', { exact: true }).click();
+   await page.getByRole('button',{name:'Open run gate-fixture',exact:true}).click();
    await expect(page.locator('.timeline .event')).toHaveCount(1);expect(approvals).toBe(0);return;
  }
  if(scenario==='restore-again') {
@@ -87,5 +89,7 @@ for (const scenario of ['idle','cross-tab-approval','cross-tab-cancellation','re
  await gate.getByRole('button',{name:'Approve disclosed cohort and score'}).click();
  await expect(page.getByText('Saved in this browser',{exact:true})).toBeVisible();
  await expect(gate).toHaveCount(0);expect(approvals).toBe(1);
- await page.reload();await page.getByRole('button',{name:'History',exact:true}).click();await page.getByRole('button',{name:'Open run gate-fixture',exact:true}).click();await expect(page.locator('.timeline .event')).toHaveCount(3);
+ await page.reload();await page.getByRole('button',{name:'View Runs',exact:true}).click();
+ await page.getByText('Run history', { exact: true }).click();
+ await page.getByRole('button',{name:'Open run gate-fixture',exact:true}).click();await expect(page.locator('.timeline .event')).toHaveCount(3);
 });

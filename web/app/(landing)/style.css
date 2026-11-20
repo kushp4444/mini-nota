@@ -116,17 +116,11 @@ a:active { text-decoration-thickness: 2px; }
 .cohort-counts { margin: var(--space-lg) 0 0; }
 .cohort-counts > div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-md); padding: var(--space-xs) 0; border-top: 1px solid var(--color-rule-2); }
 .cohort-counts dt { min-width: 0; }
-.cohort-counts dd, .estimate, .interval-labels { font-family: var(--font-outlier); font-variant-numeric: tabular-nums; }
+.cohort-counts dd, .feature-count { font-family: var(--font-outlier); font-variant-numeric: tabular-nums; }
 .cohort-counts dd { margin: 0; }
-.benchmark { margin: 0; padding: var(--space-lg); border-top: 2px solid var(--color-ink); background: var(--color-sheet); }
-.benchmark .estimate { margin: 0; font-size: clamp(3.5rem, 7vw, 6.5rem); line-height: 1.05; letter-spacing: -.07em; color: var(--color-ink); }
-.benchmark figcaption { color: var(--color-muted); }
-.interval { margin: var(--space-lg) 0 var(--space-md); }
-.interval-axis { height: 1px; position: relative; background: var(--color-rule-2); }
-.interval-range { position: absolute; inset: -1px 13% auto 16.5%; height: 3px; background: var(--color-accent); }
-.interval-marker { position: absolute; inset: -6px auto auto calc(53% - 1px); width: 3px; height: 13px; background: var(--color-accent); }
-.interval-labels { display: flex; justify-content: space-between; margin-top: var(--space-xs); font-size: var(--text-xs); color: var(--color-muted); }
-.benchmark > p:last-child { max-width: 36ch; }
+.feature-summary { padding: var(--space-lg); border-top: 2px solid var(--color-ink); background: var(--color-sheet); }
+.feature-summary .feature-count { margin: 0; font-size: clamp(3.5rem, 7vw, 6.5rem); line-height: 1.05; letter-spacing: -.07em; }
+.prototype-note { margin-top: var(--space-lg); padding-top: var(--space-md); border-top: 1px solid var(--color-rule-2); }
 
 .stack { margin: 0; border-top: 2px solid var(--color-ink); }
 .stack > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2.4fr); align-items: baseline; gap: var(--column-gap); padding: var(--space-lg) 0; border-bottom: 1px solid var(--color-rule-2); }

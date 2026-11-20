@@ -1,0 +1,3 @@
+# Preserve the exact bytes of content-addressed demo exports.
+web/public/examples/files/*.csv -text whitespace=cr-at-eol
+web/public/examples/files/*.json -text

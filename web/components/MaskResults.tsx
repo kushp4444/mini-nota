@@ -7,7 +7,7 @@ export type MaskPatientResult = {
   status: string;
   values: Record<string, unknown>;
   errors: { code?: string; message: string }[];
-  artifacts?: { role?: string; media_type: string; data_base64?: string }[];
+  artifacts?: { role?: string; media_type: string; data_base64?: string; imageUrl?: string }[];
 };
 
 /** Render retained stage values and bytes; no expiring server URLs. */
@@ -65,7 +65,7 @@ export default function MaskResults({ selectedIds, results, qcResults, ended=fal
         const qc = qcResults.find(r => r.patient_id === id);
         const excluded = qc && qc.status !== "success";
         const values = patient?.values;
-        const overlay = patient?.artifacts?.find(a => a.role === "overlay" && a.media_type === "image/png" && a.data_base64);
+        const overlay = patient?.artifacts?.find(a => a.role === "overlay" && a.media_type === "image/png" && (a.imageUrl || a.data_base64));
         const shape = values?.shape as number[] | undefined;
         const spacing = values?.spacing_mm as number[] | undefined;
         const ratio = shape && spacing ? shape[2] * spacing[2] / (shape[1] * spacing[1]) : 1;
@@ -92,7 +92,8 @@ export default function MaskResults({ selectedIds, results, qcResults, ended=fal
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img tabIndex={0} aria-describedby={`${controlId}-scan-${id}`}
                   alt={`${id} tumor mask overlay on middle tumor-bearing CT slice`}
-                  src={`data:image/png;base64,${overlay.data_base64}`} style={{width: "100%", height: "100%", display: "block"}} />
+                  src={overlay.imageUrl ?? `data:image/png;base64,${overlay.data_base64}`} loading={overlay.imageUrl ? "lazy" : undefined}
+                  style={{width: "100%", height: "100%", display: "block"}} />
                 <div className="scan-tooltip" role="tooltip" id={`${controlId}-scan-${id}`}>
                   <p>The orange overlay marks the tumor.</p>
                   {compact && typeof volume === "number" && Number.isFinite(volume) && <p>Tumor volume: {volume.toLocaleString(undefined, {maximumFractionDigits: 3})} cm³</p>}
@@ -116,15 +117,15 @@ export default function MaskResults({ selectedIds, results, qcResults, ended=fal
         </article>;
       })}
     </div></>}
+    {children}
     {volumes.length > 0 && <details className="result-inner-details">
       <summary>View tumor volumes</summary>
-      <table className="tumor-volumes"><thead><tr><th scope="col">Patient</th><th scope="col">Volume</th></tr></thead>
+      <table className="result-list-table"><thead><tr><th scope="col">Patient</th><th scope="col">Volume</th></tr></thead>
         <tbody>{volumes.map(patient => <tr key={patient.patient_id}><th scope="row">{patient.patient_id}</th><td>
           {(patient.values.volume_cm3 as number).toLocaleString(undefined, {maximumFractionDigits: 3})} cm³
         </td></tr>)}</tbody>
       </table>
     </details>}
-    {children}
     </details>
   </section>;
 }

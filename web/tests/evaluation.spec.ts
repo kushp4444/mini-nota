@@ -9,12 +9,13 @@ test('fixed held-out evaluation stays visible beside a one-patient exploratory r
   await page.goto('/workspace');
   await expect(page.getByText('82 frozen held-out patients')).toBeVisible();
   await page.getByRole('button',{name:'Analysis',exact:true}).click();
+  await page.locator('#prototype-model > summary').click();
   const full = page.getByLabel('How the model did on its test group', { exact: true });
   const fullFinding = full.getByText('Patients the model ranked higher tended to die sooner.', { exact: true });
   const fullCaption = full.getByText(/C-index 0\.606 .*95% confidence interval 0\.533–0\.674/);
   await expect(fullFinding).toBeVisible();
   await expect(fullCaption).toBeVisible();
-  const method = full.getByText(/C-index checks how often/);
+  const method = full.getByText(/The C-index sums up how often/);
   await expect(method).toBeHidden();
   await full.getByText('View details', { exact: true }).click();
   await expect(method).toBeVisible();
@@ -22,6 +23,7 @@ test('fixed held-out evaluation stays visible beside a one-patient exploratory r
   await page.getByLabel('Select all patients').uncheck();
   await page.getByLabel('Select LUNG1-002',{exact:true}).check();
   await page.getByRole('button',{name:'Run analysis'}).click();
+  await page.locator('#prototype-model > summary').click();
   await expect(page.getByText('1 / 1 scored',{exact:true})).toBeVisible({timeout:90000});
   const selected=page.getByLabel('What happened to the patients you selected',{exact:true});
   await expect(selected.getByText(/at least two patients/)).toBeVisible();
@@ -31,10 +33,11 @@ test('fixed held-out evaluation stays visible beside a one-patient exploratory r
   await expect(fullCaption).toBeVisible();
   await expect(selected.getByText(/Only one had a record we could use/)).toBeVisible();
   await expect(selected.getByText(/C-index unavailable/)).toBeVisible();
-  await page.getByLabel('Frozen model risk scores', { exact: true }).locator(":scope > details > summary").click();
+  const scores = page.getByLabel('Frozen model risk scores', { exact: true });
+  await scores.locator(":scope > details > summary").click();
   const row=page.getByRole('table',{name:'Patient risk scores'}).getByRole('row').nth(1);
   await expect(row).toContainText('higher model risk');
-  await expect(row).toContainText(metadata.model_version);
+  await expect(scores.getByText(`Model ${metadata.model_version}`, {exact:false})).toBeVisible();
   const saved=await page.evaluate(async()=>{
     const db=await new Promise<IDBDatabase>(resolve=>{const r=indexedDB.open('mini-nota-history');r.onsuccess=()=>resolve(r.result);});
     const rows=await new Promise<any[]>(resolve=>{const r=db.transaction('runs').objectStore('runs').getAll();r.onsuccess=()=>resolve(r.result);});db.close();return rows[0];
@@ -46,13 +49,18 @@ test('fixed held-out evaluation stays visible beside a one-patient exploratory r
   expect(api.evaluation.c_index).toBeNull();
   expect(api.scores[0].risk_percentile).toBeCloseTo(96.08433734939759,10);
   await page.screenshot({path:'/private/tmp/mini-nota-implementation/ticket8-evaluation.png',fullPage:true});
-  await page.getByRole('button',{name:'History',exact:true}).click();
+  await page.getByRole('button',{name:'View Runs',exact:true}).click();
+  await page.getByText('Run history', { exact: true }).click();
   await page.getByRole('button',{name:`Open run ${saved.id}`,exact:true}).click();
+  await page.locator('#prototype-model > summary').click();
   await expect(page.getByLabel('What happened to the patients you selected',{exact:true}).getByRole('img')).toBeVisible();
   await page.route('**/api/**',route=>route.abort());
   await page.reload();
-  await page.getByRole('button',{name:'History',exact:true}).click();
+  await page.getByRole('button',{name:'View Runs',exact:true}).click();
+  await page.getByText('Run history', { exact: true }).click();
   await page.getByRole('button',{name:`Open run ${saved.id}`,exact:true}).click();
+  await page.locator('#prototype-model > summary').click();
   await expect(page.getByLabel('What happened to the patients you selected',{exact:true}).getByRole('img')).toBeVisible();
+  await full.locator('summary').click();
   await expect(fullCaption).toBeVisible();
 });

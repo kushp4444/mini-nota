@@ -1,0 +1,18 @@
+.run-history { display: flow-root; margin-block: 24px; }
+.result-inner-details.run-picker { margin-top: 0; border-top: 0; }
+.run-picker-list { max-height: 18rem; overflow: auto; }
+.run-picker tr { position: relative; }
+.run-picker th, .run-picker td { overflow-wrap: anywhere; }
+.run-picker .history-entry {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+}
+.run-picker .history-entry::after { content: ""; position: absolute; inset: 0; }
+.run-picker .history-entry[aria-pressed="true"] { color: var(--color-accent); }
+.run-picker .history-entry:focus-visible::after { outline: 2px solid var(--color-focus); outline-offset: -3px; }
+.run-picker .run-picker-note { margin: 8px 0 0; color: var(--color-muted); font-size: 14px; }

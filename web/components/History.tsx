@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import BetaModelResults from "./BetaModelResults";
 import EvaluationResults from "./EvaluationResults";
 import FeatureResults from "./FeatureResults";
 import ScoreResults, { HeldOutBenchmark } from "./ScoreResults";
@@ -63,92 +64,72 @@ function gateStatus(run: SavedRun, gate: Audit, nextGate?: Audit) {
 }
 
 export default function History({
-  runs,
   selected,
-  onSelect,
+  title,
+  subtitle,
+  faults,
+  exampleFiles,
   onRecover,
-  example = false,
 }: {
-  runs: SavedRun[];
-  example?: boolean;
   selected?: SavedRun;
-  onSelect: (run: SavedRun) => void;
+  title?: string;
+  subtitle?: string;
+  faults?: string[];
+  exampleFiles?: Record<string, string>;
   onRecover?: ArtifactRecovery;
 }) {
-  const [detailsOpen,setDetailsOpen] = useState(false);
-  const retained = usePatientResults(selected);
-  const completedExample = Boolean(example && selected?.status === "completed" && selected.events.every(event => event.kind !== "gate"));
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const retained = usePatientResults(selected, exampleFiles);
   const hasResult = (...stages: string[]) => selected?.events.some(
     event => event.kind === "tool_result" && stages.includes(event.payload.stage),
   );
   const gates = selected?.events.filter(event => event.kind === "gate" && event.payload.report) ?? [];
+  const showEvidence = selected?.status !== "completed" || gates.length > 0 || !hasResult("score", "evaluation") || !hasResult("features");
+  const scanChecks = selected && <QCResults selectedIds={selected.patientIds} results={retained.qc ?? []} ended />;
   useEffect(() => setDetailsOpen(false), [selected?.id]);
   return (
-    <div className="history">
-      {!example && <div className="card card-heading">
-        <div>
-          <h2>Browser-local history</h2>
-          <p>
-            Read-only results saved on this device. Clearing site data or using
-            another browser loses this history; start a new run if it is lost.
-          </p>
+    <section className="card saved-run" aria-label="Saved run results">
+      {selected && <>
+        <div className="example-run-heading">
+          <h1 id="report-heading">{title ?? `Saved run · ${selected.status}`}</h1>
+          <p>{selected.patientIds.length} {selected.patientIds.length === 1 ? "patient" : "patients"}{subtitle ? `. ${subtitle}` : ""}</p>
+          {selected.status !== "completed" && selected.reason && <p>{selected.reason}</p>}
         </div>
+        <nav className="example-section-links" aria-label="Run sections">
+          <a href="#scans">Scans</a><a href="#measurements">Measurements</a><a href="#prototype-model">Model evaluation</a>
+        </nav>
+        {!!faults?.length && <div className="example-faults">
+          <strong>Deliberately introduced fixture faults; the live library is unchanged.</strong>
+          <ul>{faults.map(fault => <li key={fault}>{fault}</li>)}</ul>
+        </div>}
+      </>}
+      <div id="scans">
+        {selected && <>
+          {showEvidence && scanChecks}
+          <MaskResults key={selected.id} selectedIds={selected.patientIds} results={retained.masks ?? []} qcResults={retained.qc ?? []} ended compact>
+            {!showEvidence && <details className="result-inner-details scan-checks-details"><summary>Scan checks</summary>{scanChecks}</details>}
+          </MaskResults>
+        </>}
       </div>
-      }
-      {!example && !runs.length && (
-        <div className="card empty">
-          <h2>No saved terminal runs</h2>
-          <p>
-            No history was found in this browser. If site data was cleared,
-            previous runs cannot be recovered; start a new run.
-          </p>
-        </div>
-      )}
-      {!example && <div className="history-list">
-        {runs.map((run) => (
-          <button
-            className="card history-entry"
-            key={run.id}
-            onClick={() => onSelect(run)}
-            aria-label={`Open run ${run.id}`}
-          >
-            <strong>{run.id}</strong>
-            <span className={`status ${run.status}`}>{run.status}</span>
-            <small>
-              {new Date(run.createdAt).toLocaleString()} ·{" "}
-              {run.patientIds.length} patients
-            </small>
-          </button>
-        ))}
-      </div>}
-      {selected && (
-        <section className="card saved-run" aria-label="Saved run results">
-          {!example && <div className="card-heading">
-            <div>
-              <h2>Saved run · {selected.status}</h2>
-              {selected.status !== "completed" && selected.reason && <p>{selected.reason}</p>}
-            </div>
-          </div>}
-          {hasResult("score", "evaluation")
-            ? <ScoreResults selectedIds={selected.patientIds} events={selected.events} showBenchmark={false} compact={example} />
-            : !hasResult("survival") && <EvaluationResults ended />}
-          <HeldOutBenchmark events={selected.events} compact={example} />
-          <div id={example ? "scans" : undefined}>
-            <MaskResults selectedIds={selected.patientIds} results={retained.masks||[]} qcResults={retained.qc||[]} ended compact={example}>
-              {completedExample && <details className="result-inner-details scan-checks-details"><summary>Scan checks</summary><QCResults selectedIds={selected.patientIds} results={retained.qc||[]} ended /></details>}
-            </MaskResults>
-            {!completedExample && <QCResults selectedIds={selected.patientIds} results={retained.qc||[]} ended />}
+      {selected && <>
+          <div id="measurements">
+            <FeatureResults key={selected.id} selectedIds={selected.patientIds}
+              results={retained.features ?? []}
+              qcResults={retained.qc ?? []}
+              maskResults={retained.masks ?? []} ended compact />
           </div>
-          <div id={example ? "measurements" : undefined}>{selected.events.some(e => e.kind === "tool_result" && e.payload.stage === "features") && <FeatureResults selectedIds={selected.patientIds}
-            results={retained.features||[]}
-            qcResults={retained.qc||[]}
-            maskResults={retained.masks||[]} ended compact={example} />}</div>
+          <BetaModelResults key={`model:${selected.id}`}>
+            {hasResult("score", "evaluation")
+              ? <ScoreResults selectedIds={selected.patientIds} events={selected.events} showBenchmark={false} compact />
+              : !hasResult("survival") && <EvaluationResults ended />}
+            <HeldOutBenchmark events={selected.events} compact />
+          </BetaModelResults>
           {gates.map((e, index) => <section key={e.id} aria-label="Recorded exclusion approval">
             <h3>Recorded exclusion disclosure</h3><p>{gateStatus(selected, e, gates[index + 1])}</p>
             <p>{e.payload.report.scoring_eligible_count} scoring-eligible patients · {e.payload.report.evaluation_eligible_count} evaluation-eligible patients</p>
             <table><thead><tr><th>Patient</th><th>Scoring</th><th>Evaluation</th><th>Reason</th></tr></thead><tbody>{e.payload.report.dispositions.map((p:any) => <tr key={p.patient_id}><td>{p.patient_id}</td><td>{p.scoring_eligible ? "Eligible" : "Excluded"}</td><td>{p.evaluation_eligible ? "Eligible" : "Excluded"}</td><td>{p.reasons.map((r:any) => r.message).join("; ") || "Usable features and outcome"}</td></tr>)}</tbody></table>
           </section>)}
-          <details className="saved-evidence" open={!completedExample}><summary>Saved evidence</summary>
+          <details key={`evidence:${selected.id}`} className="saved-evidence" open={showEvidence}><summary>Saved evidence</summary>
           <details><summary>Selected patients ({selected.patientIds.length})</summary><p>{selected.patientIds.join(", ")}</p></details>
           <details className="structured-details" onToggle={e=>setDetailsOpen(e.currentTarget.open)}><summary>Structured stage details</summary>{detailsOpen && selected.events.filter(e=>e.kind==='tool_result'||e.payload.report).map(event=><div className="saved-result" key={event.id}><h4>{event.payload.stage} · {event.payload.patient?.patient_id||'cohort'}</h4><pre>{JSON.stringify(event.payload,null,2)}</pre></div>)}</details>
           {stageNames(selected.events).map((stage) => {
@@ -197,8 +178,9 @@ export default function History({
                   </>
                 )}
                 {selected.artifacts
-                  .filter((a) => a.stage === stage && !(stage === "masks" && a.role === "overlay" && a.mediaType === "image/png" && a.blob && !a.error))
+                  .filter((a) => a.stage === stage && !(stage === "masks" && a.role === "overlay" && a.mediaType === "image/png" && (exampleFiles?.[a.id] || (a.blob && !a.error))))
                   .map((a) => (
+                    exampleFiles?.[a.id] ? <p key={a.id}><a href={exampleFiles[a.id]} download={`${a.patientId || stage}-${a.role}.${exampleFiles[a.id].split(".").pop()}`}>Open saved {a.role}</a></p> :
                     a.blob ? <SavedArtifactView key={a.id} artifact={a} /> :
                     <MissingArtifact key={a.id} run={selected} artifact={a} onRecover={onRecover} />
                   ))}
@@ -206,8 +188,7 @@ export default function History({
             );
           })}
           </details>
-        </section>
-      )}
-    </div>
+      </>}
+    </section>
   );
 }

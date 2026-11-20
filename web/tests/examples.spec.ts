@@ -1,14 +1,85 @@
 import { test, expect } from '@playwright/test';
 
+test('switching runs keeps one survival model section', async ({ page }) => {
+  await page.goto('/workspace?example=completed');
+  const modelSections = page.locator('details.prototype-results');
+  await expect(modelSections).toHaveCount(1);
+  await page.getByText('Run history', { exact: true }).click();
+  for (const name of ['Failure example', 'Completed example', 'Failure example']) {
+    await page.getByRole('button', { name, exact: true }).click();
+    await expect(page.getByRole('heading', { name, exact: true })).toBeVisible();
+    await expect(modelSections).toHaveCount(1);
+  }
+});
+
+test('View Runs shows the completed example immediately, including after refresh', async ({page}) => {
+  const artifactRequests: string[] = [];
+  await page.route('**/examples/files/**', route => {
+    artifactRequests.push(route.request().url());
+    return route.abort();
+  });
+  await page.route('**/examples/curated-success.json', route => route.abort());
+  await page.goto('/workspace');
+  for (const visit of [0, 1]) {
+    if (visit) await page.reload();
+    await page.getByRole('button', {name:'View Runs', exact:true}).click();
+    await expect(page.getByRole('heading', {name:'Completed example', exact:true})).toBeVisible({timeout:2000});
+    await expect(page.getByRole('navigation', {name:'Run sections'})).toBeVisible();
+    await expect(page.getByText('Loading example…', {exact:true})).toBeHidden();
+  }
+  expect(artifactRequests).toEqual([]);
+});
+
+test('landing links preserve Back and open the completed demo with the standard navigation', async ({page}) => {
+  await page.goto('/');
+  await page.getByRole('link', {name:'Run your own analysis', exact:true}).click();
+  await expect(page).toHaveURL(/\/workspace$/);
+  await page.goBack();
+  await expect(page.getByRole('heading', {name:'From CT scans to tumor features.'})).toBeVisible();
+
+  await page.getByRole('link', {name:'View demo run', exact:true}).first().click();
+  await expect(page.getByRole('heading', {name:'Completed example', exact:true})).toBeVisible();
+  const navigation = page.getByRole('navigation', {name:'Main navigation'});
+  await navigation.getByRole('button', {name:'Patients', exact:true}).click();
+  await expect(page.getByRole('heading', {name:'Patient library', exact:true})).toBeVisible();
+  await expect(page).toHaveURL(/\/workspace$/);
+  await page.goBack();
+  await expect(page.getByRole('heading', {name:'From CT scans to tumor features.'})).toBeVisible();
+});
+
 test('curated execution is immediately inspectable without launching a visitor run', async ({page}) => {
   let launches = 0;
   await page.route('**/api/runs**', async route => { launches++; await route.abort(); });
   await page.goto('/workspace');
-  await page.getByRole('button', {name:'View completed example', exact:true}).click();
-  await expect(page.getByText('Completed example', {exact:true})).toBeVisible({timeout:30000});
-  await expect(page.getByText('82 patients. One completed run.', {exact:true})).toBeVisible();
+  await page.getByRole('button', {name:'View Runs', exact:true}).click();
+  await expect(page.getByRole('heading', {name:'Completed example', exact:true})).toBeVisible({timeout:30000});
+  const history = page.locator('.run-history:has(+ .saved-run) > details.run-picker');
+  const historyTitle = history.locator('summary');
+  const historyTable = history.getByRole('table', {name:'Run history'});
+  await expect(historyTitle).toHaveText('Run history');
+  await expect(history).toHaveJSProperty('open', false);
+  await expect(history).toHaveCSS('border-top-width', '0px');
+  await expect(historyTable).toBeHidden();
+  await historyTitle.click();
+  await expect(historyTable.getByRole('button')).toHaveCount(2);
+  await historyTitle.click();
+  await expect(historyTable).toBeHidden();
+  await historyTitle.click();
+  await expect(page.getByRole('heading', {name:'View Runs', exact:true})).toHaveCount(0);
+  await expect(history.getByRole('button', {name:'Completed example', pressed:true})).toBeVisible();
+  await expect(history.getByRole('button', {name:'Failure example'})).toBeVisible();
+  await expect(page.getByText('82 patients. Tumor masks and 72 radiomic features per patient.', {exact:true})).toBeVisible();
+  const jumpLinks = page.locator('.example-run-heading + nav');
+  await expect(jumpLinks.getByRole('link')).toHaveText(['Scans', 'Measurements', 'Model evaluation']);
+  await expect(page.getByRole('link', {name:'View run record'})).toHaveCount(0);
   await expect(page.getByRole('region', {name:'Saved run results'})).toBeVisible();
   const results = page.getByRole('region', {name:'Saved run results'});
+  await expect(results.getByRole('region', {name:'Radiomic features'})).toBeVisible();
+  const prototype = results.locator('#prototype-model');
+  await expect(prototype).toHaveJSProperty('open', false);
+  await expect(prototype.getByText('Beta', {exact:true})).toBeVisible();
+  await prototype.getByText('Survival model Beta', {exact:true}).click();
+  await expect(prototype.getByText(/risk rankings may be inaccurate/)).toBeVisible();
   const scoring = results.getByRole('region', {name:'Frozen model risk scores'});
   const evaluation = scoring.getByRole('region', {name:'What happened to the patients you selected'});
   await evaluation.getByText('How to read this result', {exact:true}).click();
@@ -22,11 +93,18 @@ test('curated execution is immediately inspectable without launching a visitor r
   await expect(page.getByText('Not a medical device or medical advice.', {exact:false})).toBeVisible();
   const masks = page.getByRole('region', {name:'Tumor masks'});
   await masks.locator('summary').first().click();
+  await masks.getByText('View tumor volumes', {exact:true}).click();
+  const volumeTable = masks.locator('table.result-list-table');
+  await expect(volumeTable).toBeVisible();
+  await expect(historyTable.getByRole('columnheader')).toHaveCount(2);
+  expect((await historyTable.boundingBox())?.x).toBe((await volumeTable.boundingBox())?.x);
   await expect(masks.getByText('82 passed')).toBeVisible();
   const firstMask = masks.getByRole('article').filter({hasText:'LUNG1-002'});
   await firstMask.getByRole('img').hover();
   await expect(firstMask.getByRole('tooltip').getByText('Tumor volume: 368.707 cm³', {exact:true})).toBeVisible();
-  await expect(firstMask.getByRole('img', {name:'LUNG1-002 tumor mask overlay on middle tumor-bearing CT slice'})).toBeVisible();
+  const overlay = firstMask.getByRole('img', {name:'LUNG1-002 tumor mask overlay on middle tumor-bearing CT slice'});
+  await expect(overlay).toBeVisible();
+  await expect.poll(() => overlay.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
   const features = page.getByRole('region', {name:'Radiomic features'});
   await features.getByText('Tumor measurements', {exact:true}).click();
   await expect(features.getByText('Shape, intensity, and texture.')).toBeVisible();
@@ -57,16 +135,15 @@ test('curated execution is immediately inspectable without launching a visitor r
   await expect(timeline.first()).toContainText('plan');
   await expect(timeline.last()).toContainText('done');
   expect(launches).toBe(0);
-  await page.getByRole('button',{name:'Examples',exact:true}).first().click();
-  await page.getByRole('button',{name:'History',exact:true}).click();
-  await expect(page.getByText('No saved terminal runs', {exact:true})).toBeVisible();
 });
 
 test('failure fixture discloses named exclusions and recorded approval without visitor capabilities', async ({page}) => {
   const controls: string[] = [];
   await page.route('**/api/runs**', async route => { controls.push(route.request().url()); await route.abort(); });
   await page.goto('/workspace');
-  await page.getByRole('button',{name:'View failure example',exact:true}).click();
+  await page.getByRole('button', {name:'View Runs', exact:true}).click();
+  await page.getByText('Run history', { exact: true }).click();
+  await page.getByRole('button',{name:'Failure example',exact:true}).click();
   await expect(page.getByText('Deliberately introduced fixture faults; the live library is unchanged.',{exact:true})).toBeVisible();
   const checks = page.getByRole('region', {name:'Scan quality'});
   await expect(checks.getByText('2 patients passed scan checks and could continue to mask construction.')).toBeVisible();
@@ -102,6 +179,12 @@ test('failure fixture discloses named exclusions and recorded approval without v
     inspect(asset);
     const overlays = asset.events.filter((e:any) => e.payload.stage === 'masks' && e.kind === 'tool_result').flatMap((e:any) => e.payload.patient.artifacts);
     expect(overlays.length).toBe(kind === 'success' ? 82 : 2);
-    for (const overlay of overlays) expect(Buffer.from(overlay.data_base64,'base64').subarray(0,8)).toEqual(Buffer.from([137,80,78,71,13,10,26,10]));
+    for (const overlay of overlays) {
+      expect(overlay.file).toMatch(/^[a-f0-9]{64}\.png$/);
+      expect(overlay.data_base64).toBeUndefined();
+    }
+    const image = await page.request.get(`/examples/files/${overlays[0].file}`);
+    expect(image.ok()).toBeTruthy();
+    expect((await image.body()).subarray(0,8)).toEqual(Buffer.from([137,80,78,71,13,10,26,10]));
   }
 });

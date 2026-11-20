@@ -16,6 +16,7 @@ test("real held-out patient receives frozen model score and retains it in Histor
   await page.getByLabel('Select all patients').uncheck();
   await page.getByLabel(`Select ${id}`, {exact:true}).check();
   await page.getByRole('button',{name:'Run analysis'}).click();
+  await page.locator('#prototype-model > summary').click();
   const scores = page.getByLabel('Frozen model risk scores', {exact:true});
   await expect(scores.getByText('1 / 1 scored',{exact:true})).toBeVisible({timeout:90000});
   const finding = scores.getByRole("heading", { name: id, exact: true });
@@ -44,12 +45,14 @@ test("real held-out patient receives frozen model score and retains it in Histor
   expect(scored.scores[0].patient_id).toBe(id);
   expect(scored.model_version).toBe(data.modelMetadata.model_version);
   expect(scored.scores[0].risk_score).toBe(saved.events.find((e:any)=>e.payload.stage==='score'&&e.kind==='tool_result').payload.patient.values.risk_score);
-  await page.getByRole('button',{name:'History',exact:true}).click();
+  await page.getByRole('button',{name:'View Runs',exact:true}).click();
+  await page.getByText('Run history', { exact: true }).click();
   await page.getByRole('button',{name:`Open run ${saved.id}`,exact:true}).click();
   await expect(finding).toBeVisible();
   await expect(table).toBeHidden();
   await page.reload();
-  await page.getByRole('button',{name:'History',exact:true}).click();
+  await page.getByRole('button',{name:'View Runs',exact:true}).click();
+  await page.getByText('Run history', { exact: true }).click();
   await page.getByRole('button',{name:`Open run ${saved.id}`,exact:true}).click();
   await expect(finding).toBeVisible();
   await expect(table).toBeHidden();
